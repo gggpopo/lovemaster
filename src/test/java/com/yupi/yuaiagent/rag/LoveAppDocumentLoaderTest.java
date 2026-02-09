@@ -1,19 +1,13 @@
 package com.yupi.yuaiagent.rag;
 
-import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
-import static org.junit.jupiter.api.Assertions.*;
-
-@SpringBootTest
 class LoveAppDocumentLoaderTest {
-
-    @Resource
-    private LoveAppDocumentLoader loveAppDocumentLoader;
 
     @Test
     void loadMarkdowns() {
+        LoveAppDocumentLoader loveAppDocumentLoader = new LoveAppDocumentLoader(new PathMatchingResourcePatternResolver());
         loveAppDocumentLoader.loadMarkdowns();
     }
 }

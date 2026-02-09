@@ -2,12 +2,14 @@ package com.yupi.yuaiagent.tools;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
+@EnabledIfEnvironmentVariable(named = "RUN_AI_TESTS", matches = "true")
 class WebSearchToolTest {
 
     @Value("${search-api.api-key}")

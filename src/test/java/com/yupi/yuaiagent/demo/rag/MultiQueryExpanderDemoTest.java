@@ -3,6 +3,7 @@ package com.yupi.yuaiagent.demo.rag;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.ai.rag.Query;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -11,6 +12,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
+@EnabledIfEnvironmentVariable(named = "RUN_AI_TESTS", matches = "true")
 class MultiQueryExpanderDemoTest {
 
     @Resource

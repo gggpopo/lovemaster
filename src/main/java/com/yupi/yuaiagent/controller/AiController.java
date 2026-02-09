@@ -2,14 +2,13 @@ package com.yupi.yuaiagent.controller;
 
 import com.yupi.yuaiagent.agent.YuManus;
 import com.yupi.yuaiagent.app.LoveApp;
+import com.yupi.yuaiagent.dto.VisionChatRequest;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
@@ -26,7 +25,7 @@ public class AiController {
     private ToolCallback[] allTools;
 
     @Resource
-    private ChatModel dashscopeChatModel;
+    private ChatModel chatModel;
 
     /**
      * 同步调用 AI 恋爱大师应用
@@ -99,7 +98,18 @@ public class AiController {
      */
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(String message) {
-        YuManus yuManus = new YuManus(allTools, dashscopeChatModel);
+        YuManus yuManus = new YuManus(allTools, chatModel);
         return yuManus.runStream(message);
+    }
+
+    /**
+     * SSE 流式调用 AI 恋爱大师应用（支持图片理解）
+     *
+     * @param request 包含 message、chatId、images 的请求体
+     * @return SSE 流式响应
+     */
+    @PostMapping(value = "/love_app/chat/vision", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> doChatWithLoveAppVision(@RequestBody VisionChatRequest request) {
+        return loveApp.doChatWithVision(request.getMessage(), request.getChatId(), request.getImages());
     }
 }

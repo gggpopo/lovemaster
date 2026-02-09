@@ -4,8 +4,8 @@
     <div class="chat-messages" ref="messagesContainer">
       <div v-for="(msg, index) in messages" :key="index" class="message-wrapper">
         <!-- AI消息 -->
-        <div v-if="!msg.isUser" 
-             class="message ai-message" 
+        <div v-if="!msg.isUser"
+             class="message ai-message"
              :class="[msg.type]">
           <div class="avatar ai-avatar">
             <AiAvatarFallback :type="aiType" />
@@ -18,10 +18,14 @@
             <div class="message-time">{{ formatTime(msg.time) }}</div>
           </div>
         </div>
-        
+
         <!-- 用户消息 -->
         <div v-else class="message user-message" :class="[msg.type]">
           <div class="message-bubble">
+            <!-- 显示用户上传的图片 -->
+            <div v-if="msg.images && msg.images.length > 0" class="message-images">
+              <img v-for="(img, imgIndex) in msg.images" :key="imgIndex" :src="img" class="message-image" />
+            </div>
             <div class="message-content">{{ msg.content }}</div>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
           </div>
@@ -33,19 +37,41 @@
     </div>
 
     <!-- 输入区域 -->
-    <div class="chat-input-container">
+    <div class="chat-input-container" :class="{ 'has-preview': selectedImages.length > 0 }">
+      <!-- 图片预览区 -->
+      <div v-if="selectedImages.length > 0" class="image-preview-area">
+        <div v-for="(img, index) in selectedImages" :key="index" class="preview-item">
+          <img :src="img" class="preview-image" />
+          <button class="remove-image-btn" @click="removeImage(index)">×</button>
+        </div>
+      </div>
+
       <div class="chat-input">
-        <textarea 
-          v-model="inputMessage" 
+        <!-- 附件按钮 -->
+        <button class="attach-button" @click="triggerFileInput" :disabled="connectionStatus === 'connecting'">
+          📎
+        </button>
+        <input
+          type="file"
+          ref="fileInput"
+          @change="handleFileSelect"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          multiple
+          style="display: none"
+        />
+
+        <textarea
+          v-model="inputMessage"
           @keydown.enter.prevent="sendMessage"
-          placeholder="请输入消息..." 
+          @paste="handlePaste"
+          placeholder="请输入消息..."
           class="input-box"
           :disabled="connectionStatus === 'connecting'"
         ></textarea>
-        <button 
-          @click="sendMessage" 
+        <button
+          @click="sendMessage"
           class="send-button"
-          :disabled="connectionStatus === 'connecting' || !inputMessage.trim()"
+          :disabled="connectionStatus === 'connecting' || (!inputMessage.trim() && selectedImages.length === 0)"
         >发送</button>
       </div>
     </div>
@@ -75,20 +101,103 @@ const emit = defineEmits(['send-message'])
 
 const inputMessage = ref('')
 const messagesContainer = ref(null)
+const fileInput = ref(null)
+const selectedImages = ref([])
+
+// 图片大小限制 5MB
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 
 // 根据AI类型选择不同头像
 const aiAvatar = computed(() => {
-  return props.aiType === 'love' 
+  return props.aiType === 'love'
     ? '/ai-love-avatar.png'  // 恋爱大师头像
     : '/ai-super-avatar.png' // 超级智能体头像
 })
 
+// 触发文件选择
+const triggerFileInput = () => {
+  fileInput.value.click()
+}
+
+// 处理文件选择
+const handleFileSelect = (event) => {
+  const files = event.target.files
+  if (!files || files.length === 0) return
+
+  // 限制最多3张图片
+  const remainingSlots = 3 - selectedImages.value.length
+  const filesToProcess = Array.from(files).slice(0, remainingSlots)
+
+  for (const file of filesToProcess) {
+    // 检查文件大小
+    if (file.size > MAX_IMAGE_SIZE) {
+      alert(`图片 ${file.name} 超过5MB限制`)
+      continue
+    }
+
+    // 读取文件并转为 Base64
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      selectedImages.value.push(e.target.result)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // 清空 input 以便重复选择同一文件
+  event.target.value = ''
+}
+
+// 支持 Cmd+V / Ctrl+V 粘贴图片
+const handlePaste = (event) => {
+  const clipboardData = event.clipboardData
+  if (!clipboardData || !clipboardData.items) return
+
+  const items = Array.from(clipboardData.items)
+  const imageItems = items.filter(i => i.kind === 'file' && i.type && i.type.startsWith('image/'))
+  if (imageItems.length === 0) return
+
+  // 粘贴包含图片时，阻止默认粘贴（避免插入不可见字符/破坏输入）
+  event.preventDefault()
+
+  const remainingSlots = 3 - selectedImages.value.length
+  const toProcess = imageItems.slice(0, remainingSlots)
+
+  for (const item of toProcess) {
+    const file = item.getAsFile()
+    if (!file) continue
+
+    if (file.size > MAX_IMAGE_SIZE) {
+      alert(`图片超过5MB限制`)
+      continue
+    }
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      if (e?.target?.result) {
+        selectedImages.value.push(e.target.result)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+}
+
+// 移除预览图片
+const removeImage = (index) => {
+  selectedImages.value.splice(index, 1)
+}
+
 // 发送消息
 const sendMessage = () => {
-  if (!inputMessage.value.trim()) return
-  
-  emit('send-message', inputMessage.value)
+  if (!inputMessage.value.trim() && selectedImages.value.length === 0) return
+
+  // 发送消息和图片
+  emit('send-message', {
+    text: inputMessage.value,
+    images: [...selectedImages.value]
+  })
+
   inputMessage.value = ''
+  selectedImages.value = []
 }
 
 // 格式化时间
@@ -123,26 +232,22 @@ onMounted(() => {
 .chat-container {
   display: flex;
   flex-direction: column;
-  height: 70vh;
-  min-height: 600px;
-  background-color: #f5f5f5;
-  border-radius: 8px;
+  height: 100%;
+  min-height: 0;
+  background-color: rgba(255, 255, 255, 0.65);
+  border-radius: 16px;
   overflow: hidden;
-  position: relative;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(10px);
 }
 
 .chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
-  padding-bottom: 80px; /* 为输入框留出空间 */
   display: flex;
   flex-direction: column;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 72px; /* 与输入框高度相匹配 */
 }
 
 .message-wrapper {
@@ -234,15 +339,57 @@ onMounted(() => {
 }
 
 .chat-input-container {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  min-height: 72px;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.chat-input-container.has-preview {
+  min-height: 152px;
+}
+
+.image-preview-area {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px 0 16px;
+  flex-wrap: wrap;
+}
+
+.preview-item {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+
+.preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+}
+
+.remove-image-btn {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background-color: white;
-  border-top: 1px solid #e0e0e0;
-  z-index: 100;
-  height: 72px; /* 固定高度 */
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #ff4d4f;
+  color: white;
+  border: none;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remove-image-btn:hover {
+  background-color: #ff7875;
 }
 
 .chat-input {
@@ -253,6 +400,42 @@ onMounted(() => {
   align-items: center;
 }
 
+.attach-button {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background-color: transparent;
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background-color 0.3s;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+
+.attach-button:hover:not(:disabled) {
+  background-color: #f0f0f0;
+}
+
+.attach-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.message-image {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
 .input-box {
   flex-grow: 1;
   border: 1px solid #ddd;
@@ -261,7 +444,7 @@ onMounted(() => {
   font-size: 16px;
   resize: none;
   min-height: 20px;
-  max-height: 40px; /* 限制高度 */
+  max-height: 72px; /* 允许多行输入 */
   outline: none;
   transition: border-color 0.3s;
   overflow-y: auto;

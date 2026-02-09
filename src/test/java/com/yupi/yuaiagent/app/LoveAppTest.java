@@ -3,11 +3,13 @@ package com.yupi.yuaiagent.app;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.UUID;
 
 @SpringBootTest
+@EnabledIfEnvironmentVariable(named = "RUN_AI_TESTS", matches = "true")
 class LoveAppTest {
 
     @Resource

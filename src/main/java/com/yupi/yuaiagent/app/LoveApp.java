@@ -1,6 +1,7 @@
 package com.yupi.yuaiagent.app;
 
 import com.yupi.yuaiagent.advisor.MyLoggerAdvisor;
+import com.yupi.yuaiagent.advisor.CloudMemoryAdvisor;
 import com.yupi.yuaiagent.advisor.ReReadingAdvisor;
 import com.yupi.yuaiagent.chatmemory.FileBasedChatMemory;
 import com.yupi.yuaiagent.rag.LoveAppRagCustomAdvisorFactory;
@@ -12,16 +13,23 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.content.Media;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.util.MimeTypeUtils;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 @Component
@@ -35,29 +43,143 @@ public class LoveApp {
             "恋爱状态询问沟通、习惯差异引发的矛盾；已婚状态询问家庭责任与亲属关系处理的问题。" +
             "引导用户详述事情经过、对方反应及自身想法，以便给出专属解决方案。";
 
+    private static final String VISION_SYSTEM_PROMPT = """
+            你是一个聊天记录分析专家，同时也是深耕恋爱心理领域的专家。请仔细分析用户上传的聊天截图。
+
+            你需要先在内部把截图里的对话整理成结构化信息（仅用于思考，不要在最终回复中输出）。
+            **内部 JSON schema（禁止直接输出）**:
+            {
+              "messages": [
+                {
+                  "sender": "string",
+                  "direction": "sent|received",
+                  "text": "string",
+                  "timestamp": "string",
+                  "has_sticker": "boolean"
+                }
+              ]
+            }
+
+            **判断规则（内部使用）**:
+            - 根据聊天气泡的位置（通常右边是自己，左边是对方）来判断 direction；sent 表示我发送的，received 表示我收到的。
+            - 提取每个气泡内的所有文字作为 text。
+            - 如果气泡旁边有时间，提取为 timestamp。
+            - 如果有无法用文字描述的图片、动画表情或贴纸，将 has_sticker 设为 true。
+
+            **最终输出要求（对用户可见）**:
+            - 最终回复必须以 `### 恋爱专家分析与建议` 开头。
+            - 只输出用户关心的“分析与建议”，不要输出任何 JSON/代码块/逐条拆解的消息列表。
+            """;
+
+    /**
+     * 视觉输出过滤：模型可能先输出“图片分解/消息 JSON”，前端只需要用户可读的“分析与建议”。
+     * 规则：
+     * 1) 等待出现固定标题（如：### 恋爱专家分析与建议），从该处开始向下游输出。
+     * 2) 若迟迟未出现标题，缓冲达到阈值后回退输出（尽量从 ### 开始截断）。
+     */
+    private static Flux<String> keepUserFacingVisionPart(Flux<String> source) {
+        return Flux.defer(() -> Flux.create(sink -> {
+            final String[] markers = {
+                    "### 恋爱专家分析与建议",
+                    "###恋爱专家分析与建议",
+                    "恋爱专家分析与建议",
+                    "### 恋爱心理分析与建议",
+                    "###恋爱心理分析与建议",
+                    "恋爱心理分析与建议"
+            };
+            final int maxBufferBeforeFallback = 8000;
+
+            final java.util.concurrent.atomic.AtomicBoolean started = new java.util.concurrent.atomic.AtomicBoolean(false);
+            final StringBuilder buffer = new StringBuilder();
+
+            reactor.core.Disposable disposable = source.subscribe(
+                    chunk -> {
+                        if (chunk == null || chunk.isEmpty()) {
+                            return;
+                        }
+                        if (started.get()) {
+                            sink.next(chunk);
+                            return;
+                        }
+
+                        buffer.append(chunk);
+                        String buf = buffer.toString();
+
+                        int idx = -1;
+                        for (String marker : markers) {
+                            idx = buf.indexOf(marker);
+                            if (idx >= 0) {
+                                break;
+                            }
+                        }
+
+                        if (idx >= 0) {
+                            started.set(true);
+                            sink.next(buf.substring(idx));
+                            buffer.setLength(0);
+                            return;
+                        }
+
+                        if (buffer.length() >= maxBufferBeforeFallback) {
+                            started.set(true);
+                            // 尽量从第一个 markdown 标题开始截断
+                            int h = buf.indexOf("\n###");
+                            if (h >= 0) {
+                                sink.next(buf.substring(h + 1));
+                            } else {
+                                sink.next(buf);
+                            }
+                            buffer.setLength(0);
+                        }
+                    },
+                    sink::error,
+                    () -> {
+                        if (!started.get() && buffer.length() > 0) {
+                            String buf = buffer.toString();
+                            int h = buf.indexOf("\n###");
+                            sink.next(h >= 0 ? buf.substring(h + 1) : buf);
+                        }
+                        sink.complete();
+                    }
+            );
+
+            sink.onCancel(disposable::dispose);
+        }));
+    }
+
     /**
      * 初始化 ChatClient
      *
-     * @param dashscopeChatModel
+     * @param dashscopeChatModel 聊天模型
+     * @param chatMemoryRepository 可选的 ChatMemoryRepository（如 Redis 实现）
      */
-    public LoveApp(ChatModel dashscopeChatModel) {
-//        // 初始化基于文件的对话记忆
-//        String fileDir = System.getProperty("user.dir") + "/tmp/chat-memory";
-//        ChatMemory chatMemory = new FileBasedChatMemory(fileDir);
-        // 初始化基于内存的对话记忆
+    @Autowired
+    public LoveApp(ChatModel dashscopeChatModel,
+                   @Autowired(required = false) ChatMemoryRepository chatMemoryRepository,
+                   @Autowired(required = false) CloudMemoryAdvisor cloudMemoryAdvisor) {
+        // 使用注入的 ChatMemoryRepository，如果没有则使用内存实现
+        ChatMemoryRepository repository = chatMemoryRepository != null
+                ? chatMemoryRepository
+                : new InMemoryChatMemoryRepository();
+
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
-                .chatMemoryRepository(new InMemoryChatMemoryRepository())
+                .chatMemoryRepository(repository)
                 .maxMessages(20)
                 .build();
+        List<org.springframework.ai.chat.client.advisor.api.Advisor> advisors = new ArrayList<>();
+        advisors.add(MessageChatMemoryAdvisor.builder(chatMemory).build());
+        // 云端记忆增强（默认不启用，内部会检查 app.memory.cloud.enabled）
+        if (cloudMemoryAdvisor != null) {
+            advisors.add(cloudMemoryAdvisor);
+        }
+        // 自定义日志 Advisor，可按需开启
+        advisors.add(new MyLoggerAdvisor());
+//        // 自定义推理增强 Advisor，可按需开启
+//        advisors.add(new ReReadingAdvisor());
+
         chatClient = ChatClient.builder(dashscopeChatModel)
                 .defaultSystem(SYSTEM_PROMPT)
-                .defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
-                        // 自定义日志 Advisor，可按需开启
-                        new MyLoggerAdvisor()
-//                        // 自定义推理增强 Advisor，可按需开启
-//                       ,new ReReadingAdvisor()
-                )
+                .defaultAdvisors(advisors.toArray(org.springframework.ai.chat.client.advisor.api.Advisor[]::new))
                 .build();
     }
 
@@ -93,7 +215,72 @@ public class LoveApp {
                 .user(message)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 .stream()
-                .content();
+                .content()
+                // 前端通过 [DONE] 判断流式结束
+                .concatWithValues("[DONE]");
+    }
+
+    /**
+     * AI 多模态对话（支持图片理解，SSE 流式传输）
+     *
+     * @param message 用户消息
+     * @param chatId  会话ID
+     * @param images  Base64 编码的图片列表
+     * @return
+     */
+    public Flux<String> doChatWithVision(String message, String chatId, List<String> images) {
+        // 构建多模态内容
+        List<Object> contentList = new ArrayList<>();
+
+        // 添加图片
+        if (images != null && !images.isEmpty()) {
+            for (String imageData : images) {
+                // 解析 Base64 图片数据
+                // 格式: data:image/jpeg;base64,/9j/4AAQ...
+                String mimeType = "image/jpeg";
+                String base64Data = imageData;
+
+                if (imageData.startsWith("data:")) {
+                    int commaIndex = imageData.indexOf(",");
+                    if (commaIndex > 0) {
+                        String header = imageData.substring(5, commaIndex);
+                        int semicolonIndex = header.indexOf(";");
+                        if (semicolonIndex > 0) {
+                            mimeType = header.substring(0, semicolonIndex);
+                        }
+                        base64Data = imageData.substring(commaIndex + 1);
+                    }
+                }
+
+                byte[] imageBytes = Base64.getDecoder().decode(base64Data);
+                Media media = Media.builder()
+                        .mimeType(org.springframework.util.MimeType.valueOf(mimeType))
+                        .data(imageBytes)
+                        .build();
+                contentList.add(media);
+            }
+        }
+
+        // 添加文本消息
+        String userText = (message == null || message.isBlank()) ? "请分析这张图片" : message;
+
+        return chatClient
+                .prompt()
+                .system(VISION_SYSTEM_PROMPT)
+                .user(userSpec -> {
+                    for (Object content : contentList) {
+                        if (content instanceof Media) {
+                            userSpec.media((Media) content);
+                        }
+                    }
+                    userSpec.text(userText);
+                })
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .stream()
+                .content()
+                .transform(LoveApp::keepUserFacingVisionPart)
+                // 前端通过 [DONE] 判断流式结束
+                .concatWithValues("[DONE]");
     }
 
     record LoveReport(String title, List<String> suggestions) {

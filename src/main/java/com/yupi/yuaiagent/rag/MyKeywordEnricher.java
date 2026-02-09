@@ -15,10 +15,11 @@ import java.util.List;
 public class MyKeywordEnricher {
 
     @Resource
-    private ChatModel dashscopeChatModel;
+    private ChatModel chatModel;
 
     public List<Document> enrichDocuments(List<Document> documents) {
-        KeywordMetadataEnricher keywordMetadataEnricher = new KeywordMetadataEnricher(dashscopeChatModel, 5);
+        // 使用项目统一选择的 ChatModel（见 ChatModelSelectorConfig），便于切换到火山引擎
+        KeywordMetadataEnricher keywordMetadataEnricher = new KeywordMetadataEnricher(chatModel, 5);
         return  keywordMetadataEnricher.apply(documents);
     }
 }

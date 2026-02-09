@@ -3,6 +3,13 @@ spring:
     name: yu-ai-agent
   profiles:
     active: local
+  # Redis 配置（启用 app.memory.redis.enabled=true 时生效）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
 # 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
 #  datasource:
 #    url: xxx
@@ -11,14 +18,80 @@ spring:
   ai:
     dashscope:
       # 需要替换为你自己的 key
-      api-key: your-api-key
+      api-key: sk-d2053bf9bede4d5388c8f1b86bf0b31c
       chat:
         options:
           model: qwen-plus
-    ollama:
-      base-url: http://localhost:11434
+
+    # 火山引擎 Ark / 豆包：通过 OpenAI 兼容接口接入（需要启用 spring-ai-starter-model-openai 依赖）
+    # 注意：加入 OpenAI starter 后，若不配置 api-key，OpenAI 相关自动配置会直接报错导致启动失败。
+    openai:
+      api-key: 5d9c396e-e9aa-4c22-82c1-080cfb48ee6d
+      base-url: https://ark.cn-beijing.volces.com/api/v3
       chat:
-        model: gemma3:1b
+        # 火山引擎 Ark 的 OpenAI-Compatible Chat Completions 路径为 /chat/completions
+        # Spring AI 默认是 /v1/chat/completions，会拼成 /api/v3/v1/chat/completions 从而 404
+        completions-path: /chat/completions
+        options:
+          model: doubao-seed-1-8-251228
+      embedding:
+        options:
+          model: doubao-embedding
+
+#    ollama:
+#      base-url: http://localhost:11434
+#      chat:
+#        model: gemma3:1b
+
+# LLM 选择开关：dashscope（默认）/ volcengine
+# 由 src/main/java/com/yupi/yuaiagent/config/ChatModelSelectorConfig.java 统一选择 @Primary ChatModel
+app:
+  llm:
+    provider: volcengine
+  rag:
+    vectorstore:
+      preload-documents: false
+    keyword-enrich:
+      enabled: false
+  # Redis 记忆层配置
+  memory:
+    # 用户画像本地落盘（不依赖 Redis）
+    profile:
+      local-dir: ${APP_PROFILE_LOCAL_DIR:./tmp/user-profiles}
+    # 本地文件记忆（默认启用，避免重启后丢失对话上下文）
+    file:
+      enabled: true
+      dir: ${user.dir}/tmp/chat-memory
+    # 云端记忆库：异步预取 + 本地缓存（需要自行提供 token，建议用环境变量）
+    cloud:
+      enabled: false
+      search-url: https://api-knowledgebase.mlp.cn-beijing.volces.com/api/memory/search
+      # 写入接口（不同产品线可能不同；按需改为 /api/memory/add 等）
+      upsert-url: https://api-knowledgebase.mlp.cn-beijing.volces.com/api/memory/upsert
+      token: ${VOLC_MEMORY_TOKEN:}
+      collection-name: agent_learn
+      limit: 10
+      memory-type: [event_v1, profile_v1]
+      # 用户画像异步上云最小间隔（毫秒），用于削峰；0 表示不限制
+      profile-min-sync-interval-ms: 5000
+    redis:
+      enabled: false  # 开关控制，设为 true 启用 Redis 记忆
+      ttl-minutes: 60  # 对话记忆过期时间（分钟）
+      profile-ttl-days: 30  # 用户画像过期时间（天）
+  # 工具开关配置
+  tools:
+    sticker:
+      enabled: true  # 表情包推荐工具
+    content-safety:
+      enabled: true  # 内容安全检测工具
+    tone-style:
+      enabled: true  # 语气风格转换工具
+  # 多租户配置
+  tenant:
+    enabled: false  # 多租户开关
+    rate-limit:
+      enabled: true  # 限流开关
+      requests-per-minute: 60  # 每分钟请求数限制
 # 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 服务）
 #    mcp:
 #      client:
@@ -59,7 +132,7 @@ knife4j:
 # searchAPI
 search-api:
   # 需要替换为你自己的 key
-  api-key: 你的 API Key
+  api-key: 2AWmSWKuXYgTfXaM4f9QKBgZ
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
   level:
