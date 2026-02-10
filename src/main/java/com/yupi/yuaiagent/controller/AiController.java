@@ -4,6 +4,7 @@ import com.yupi.yuaiagent.agent.YuManus;
 import com.yupi.yuaiagent.app.LoveApp;
 import com.yupi.yuaiagent.dto.VisionChatRequest;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.MediaType;
@@ -14,6 +15,7 @@ import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 
+@Slf4j
 @RestController
 @RequestMapping("/ai")
 public class AiController {
@@ -36,7 +38,12 @@ public class AiController {
      */
     @GetMapping("/love_app/chat/sync")
     public String doChatWithLoveAppSync(String message, String chatId) {
-        return loveApp.doChat(message, chatId);
+        log.info("[AiController-doChatWithLoveAppSync] Request: message={}, chatId={}", message, chatId);
+        long start = System.currentTimeMillis();
+        String result = loveApp.doChat(message, chatId);
+        long cost = System.currentTimeMillis() - start;
+        log.info("[AiController-doChatWithLoveAppSync] Response: duration={}ms", cost);
+        return result;
     }
 
     /**
@@ -48,6 +55,7 @@ public class AiController {
      */
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> doChatWithLoveAppSSE(String message, String chatId) {
+        log.info("[AiController-doChatWithLoveAppSSE] Request: message={}, chatId={}", message, chatId);
         return loveApp.doChatByStream(message, chatId);
     }
 
@@ -60,6 +68,7 @@ public class AiController {
      */
     @GetMapping(value = "/love_app/chat/server_sent_event")
     public Flux<ServerSentEvent<String>> doChatWithLoveAppServerSentEvent(String message, String chatId) {
+        log.info("[AiController-doChatWithLoveAppServerSentEvent] Request: message={}, chatId={}", message, chatId);
         return loveApp.doChatByStream(message, chatId)
                 .map(chunk -> ServerSentEvent.<String>builder()
                         .data(chunk)
@@ -75,6 +84,7 @@ public class AiController {
      */
     @GetMapping(value = "/love_app/chat/sse_emitter")
     public SseEmitter doChatWithLoveAppServerSseEmitter(String message, String chatId) {
+        log.info("[AiController-doChatWithLoveAppServerSseEmitter] Request: message={}, chatId={}", message, chatId);
         // 创建一个超时时间较长的 SseEmitter
         SseEmitter sseEmitter = new SseEmitter(180000L); // 3 分钟超时
         // 获取 Flux 响应式数据流并且直接通过订阅推送给 SseEmitter
@@ -98,6 +108,7 @@ public class AiController {
      */
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(String message) {
+        log.info("[AiController-doChatWithManus] Request: message={}", message);
         YuManus yuManus = new YuManus(allTools, chatModel);
         return yuManus.runStream(message);
     }
@@ -110,6 +121,9 @@ public class AiController {
      */
     @PostMapping(value = "/love_app/chat/vision", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> doChatWithLoveAppVision(@RequestBody VisionChatRequest request) {
+        log.info("[AiController-doChatWithLoveAppVision] Request: message={}, chatId={}, imageCount={}",
+                request.getMessage(), request.getChatId(),
+                request.getImages() != null ? request.getImages().size() : 0);
         return loveApp.doChatWithVision(request.getMessage(), request.getChatId(), request.getImages());
     }
 }
