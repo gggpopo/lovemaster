@@ -30,7 +30,7 @@
     </div>
     
     <div class="footer-bottom">
-      <p>© {{ currentYear }} 小高AI超级智能体应用平台 - 让AI为你服务</p>
+      <p>© {{ currentYear }} 小高AI超级智能体应用平台</p>
     </div>
   </footer>
 </template>
@@ -44,10 +44,11 @@ const currentYear = computed(() => new Date().getFullYear())
 
 <style scoped>
 .app-footer {
-  background-color: #fff;
-  padding: 40px 0 20px;
-  color: #666;
-  border-top: 1px solid #eee;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  padding: 28px 0 16px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
   width: 100%;
   margin-top: auto;
   position: relative;
@@ -73,13 +74,13 @@ const currentYear = computed(() => new Date().getFullYear())
 .footer-logo h3 {
   font-size: 1.25rem;
   margin-bottom: 15px;
-  color: #333;
+  color: var(--text);
 }
 
 .footer-section h4 {
   font-size: 1rem;
   margin-bottom: 15px;
-  color: #333;
+  color: var(--text);
 }
 
 .footer-links {
@@ -89,13 +90,13 @@ const currentYear = computed(() => new Date().getFullYear())
 
 .footer-links a {
   margin-bottom: 10px;
-  color: #666;
+  color: var(--muted);
   text-decoration: none;
   transition: color 0.2s;
 }
 
 .footer-links a:hover {
-  color: #007bff;
+  color: var(--primary-strong);
 }
 
 .qrcode {
@@ -127,8 +128,8 @@ const currentYear = computed(() => new Date().getFullYear())
   text-align: center;
   padding-top: 20px;
   margin-top: 20px;
-  border-top: 1px solid #eee;
-  color: #999;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
   font-size: 0.9rem;
 }
 

@@ -11,7 +11,9 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
+    // 3000 默认常被 Grafana 占用，避免本地开发端口冲突
+    port: 1218,
+    strictPort: true,
     cors: true
   }
 })

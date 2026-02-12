@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import jakarta.annotation.Resource;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -18,6 +20,18 @@ public class ToolRegistration {
 
     @Value("${search-api.api-key}")
     private String searchApiKey;
+
+    @Resource
+    private DateLocationTool dateLocationTool;
+
+    @Resource
+    private WeatherTool weatherTool;
+
+    @Resource
+    private DateCalendarTool dateCalendarTool;
+
+    @Resource
+    private EmotionDetectTool emotionDetectTool;
 
     // 工具开关配置
     @Value("${app.tools.sticker.enabled:true}")
@@ -47,7 +61,11 @@ public class ToolRegistration {
                 resourceDownloadTool,
                 terminalOperationTool,
                 pdfGenerationTool,
-                terminateTool
+                terminateTool,
+                dateLocationTool,
+                weatherTool,
+                dateCalendarTool,
+                emotionDetectTool
         ));
 
         // 可选工具（根据配置开关）

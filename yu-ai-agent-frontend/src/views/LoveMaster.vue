@@ -1,28 +1,30 @@
 <template>
-  <div class="love-page">
-    <aside class="sidebar">
+  <AppShell>
+    <template #sidebar>
       <div class="sidebar-header">
         <div class="brand">
-          <div class="brand-avatar">❤</div>
+          <div class="brand-avatar" aria-hidden="true">❤</div>
           <div class="brand-meta">
             <div class="brand-title">AI恋爱大师</div>
             <div class="brand-subtitle">情感咨询 · 聊天分析</div>
           </div>
         </div>
 
-        <button class="new-chat" @click="createNewSession">+ 新对话</button>
+        <button type="button" class="new-chat" @click="createNewSession">+ 新对话</button>
 
         <div class="search">
-          <input v-model="searchKeyword" placeholder="搜索历史对话..." />
+          <input v-model="searchKeyword" placeholder="搜索历史对话..." aria-label="搜索历史对话" />
         </div>
       </div>
 
-      <div class="session-list">
+      <div class="session-list" role="list">
         <button
           v-for="s in filteredSessions"
           :key="s.id"
+          type="button"
           class="session-item"
           :class="{ active: s.id === activeSessionId }"
+          :aria-current="s.id === activeSessionId ? 'page' : undefined"
           @click="selectSession(s.id)"
         >
           <div class="session-title">{{ s.title || '新对话' }}</div>
@@ -32,41 +34,106 @@
           </div>
         </button>
       </div>
-    </aside>
+    </template>
 
-    <main class="main">
+    <template #header>
       <header class="topbar">
-        <button class="back" @click="goBack">返回</button>
+        <div class="topbar-left">
+          <button
+            type="button"
+            class="ghost mobile-only"
+            aria-label="打开会话列表"
+            @click="drawerOpen = true"
+          >会话</button>
+          <button type="button" class="ghost desktop-only" aria-label="返回首页" @click="goBack">返回</button>
+        </div>
 
         <div class="topbar-center">
           <div class="topbar-title">{{ currentSession?.title || 'AI恋爱大师' }}</div>
           <div class="topbar-sub">
-            <span class="status-dot" :class="connectionStatus" />
+            <span class="status-dot" :class="connectionStatus" aria-hidden="true" />
             <span class="status-text">{{ statusText }}</span>
-            <span class="sep">·</span>
-            <span class="chat-id">会话ID: {{ activeSessionId }}</span>
+            <span class="sep" aria-hidden="true">·</span>
+            <span class="chat-id" aria-label="会话标识">会话：{{ displaySessionId }}</span>
           </div>
         </div>
 
         <div class="topbar-actions">
-          <button class="ghost" @click="clearCurrentSession">清空</button>
+          <button type="button" class="ghost" @click="clearCurrentSession">清空</button>
         </div>
       </header>
+    </template>
 
-      <section class="chat-shell">
-        <ChatRoom
-          :messages="currentMessages"
-          :connection-status="connectionStatus"
-          ai-type="love"
-          @send-message="sendMessage"
-        />
-      </section>
+    <section class="chat-shell">
+      <ChatRoom
+        :messages="currentMessages"
+        :connection-status="connectionStatus"
+        ai-type="love"
+        @send-message="sendMessage"
+      />
+    </section>
 
-      <footer class="footer-container">
-        <AppFooter />
-      </footer>
-    </main>
-  </div>
+    <template #right>
+      <div class="aux">
+        <div class="aux-card">
+          <div class="aux-title">会话概览</div>
+          <div class="aux-body">
+            <div class="kv"><span>当前消息</span><span>{{ currentMessages.length }} 条</span></div>
+            <div class="kv"><span>状态</span><span>{{ statusText }}</span></div>
+          </div>
+        </div>
+
+        <div class="aux-card">
+          <div class="aux-title">情绪温度条</div>
+          <div class="aux-body muted">即将上线：基于对话实时分析情绪倾向</div>
+        </div>
+
+        <div class="aux-card">
+          <div class="aux-title">收藏夹</div>
+          <div class="aux-body muted">即将上线：一键收藏关键话术</div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 移动端：会话抽屉（替代桌面侧边栏） -->
+    <teleport to="body">
+      <div v-if="drawerOpen" class="drawer-mask" role="presentation" @click="drawerOpen = false" />
+      <aside
+        v-if="drawerOpen"
+        class="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="会话列表"
+      >
+        <div class="drawer-header">
+          <div class="drawer-title">会话</div>
+          <button type="button" class="ghost" aria-label="关闭" @click="drawerOpen = false">关闭</button>
+        </div>
+        <div class="drawer-body">
+          <button type="button" class="new-chat" @click="createNewSession(); drawerOpen = false">+ 新对话</button>
+          <div class="search">
+            <input v-model="searchKeyword" placeholder="搜索历史对话..." aria-label="搜索历史对话" />
+          </div>
+          <div class="session-list" role="list">
+            <button
+              v-for="s in filteredSessions"
+              :key="s.id"
+              type="button"
+              class="session-item"
+              :class="{ active: s.id === activeSessionId }"
+              @click="selectSession(s.id); drawerOpen = false"
+            >
+              <div class="session-title">{{ s.title || '新对话' }}</div>
+              <div class="session-meta">
+                <span class="session-time">{{ formatSessionTime(s.updatedAt) }}</span>
+                <span class="session-count">{{ s.messages?.length || 0 }} 条</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </aside>
+    </teleport>
+  </AppShell>
 </template>
 
 <script setup>
@@ -74,7 +141,7 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
-import AppFooter from '../components/AppFooter.vue'
+import AppShell from '../components/AppShell.vue'
 import { chatWithLoveApp, chatWithLoveAppVision } from '../api'
 
 // 设置页面标题和元数据
@@ -95,6 +162,7 @@ useHead({
 const router = useRouter()
 
 const STORAGE_KEY = 'love_master_sessions_v1'
+const LEGACY_STORAGE_KEYS = ['love_master_sessions', 'love_master_sessions_v0', 'loveMasterSessions']
 
 const connectionStatus = ref('disconnected')
 let eventSource = null
@@ -103,6 +171,7 @@ let visionRequest = null
 const sessions = ref([])
 const activeSessionId = ref('')
 const searchKeyword = ref('')
+const drawerOpen = ref(false)
 
 // 生成随机会话ID
 const generateChatId = () => 'love_' + Math.random().toString(36).substring(2, 10)
@@ -125,6 +194,13 @@ const filteredSessions = computed(() => {
   const kw = (searchKeyword.value || '').trim().toLowerCase()
   if (!kw) return sessions.value
   return sessions.value.filter(s => (s.title || '').toLowerCase().includes(kw))
+})
+
+const displaySessionId = computed(() => {
+  const id = String(activeSessionId.value || '')
+  if (!id) return ''
+  // 弱化技术性 ID：仅展示末尾片段，便于识别与排障
+  return id.length > 8 ? '…' + id.slice(-8) : id
 })
 
 const persistSessions = () => {
@@ -337,6 +413,24 @@ onMounted(() => {
     sessions.value = []
   }
 
+  // 兼容旧版本本地缓存 key（避免“历史记录消失”的感知问题）
+  if (!sessions.value || sessions.value.length === 0) {
+    for (const key of LEGACY_STORAGE_KEYS) {
+      try {
+        const raw = localStorage.getItem(key)
+        const parsed = raw ? JSON.parse(raw) : []
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          sessions.value = parsed
+          // 迁移到新 key（不删除旧 key，避免用户降级时丢失）
+          persistSessions()
+          break
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
   if (!sessions.value || sessions.value.length === 0) {
     createNewSession()
     return
@@ -374,27 +468,9 @@ const formatSessionTime = (ts) => {
 </script>
 
 <style scoped>
-/* 参考常见情感类聊天产品：左侧会话列表 + 右侧聊天主面板 */
-.love-page {
-  display: flex;
-  min-height: 100vh;
-  background: radial-gradient(1200px 600px at 20% 10%, rgba(255, 107, 139, 0.25), transparent 60%),
-    radial-gradient(1000px 500px at 80% 30%, rgba(255, 200, 215, 0.35), transparent 60%),
-    #fff;
-}
-
-.sidebar {
-  width: 280px;
-  border-right: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
-}
-
 .sidebar-header {
   padding: 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid var(--border);
 }
 
 .brand {
@@ -410,7 +486,7 @@ const formatSessionTime = (ts) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #ff6b8b, #ffb6c8);
+  background: linear-gradient(135deg, var(--primary), rgba(217, 158, 130, 0.55));
   color: #fff;
   font-weight: 700;
 }
@@ -422,7 +498,7 @@ const formatSessionTime = (ts) => {
 
 .brand-subtitle {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--muted);
 }
 
 .new-chat {
@@ -431,7 +507,7 @@ const formatSessionTime = (ts) => {
   border: none;
   border-radius: 12px;
   padding: 10px 12px;
-  background: linear-gradient(135deg, #ff6b8b, #ff9ab0);
+  background: linear-gradient(135deg, var(--primary), var(--primary-strong));
   color: #fff;
   font-weight: 600;
   cursor: pointer;
@@ -447,11 +523,15 @@ const formatSessionTime = (ts) => {
 
 .search input {
   width: 100%;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 12px;
   outline: none;
   background: rgba(255, 255, 255, 0.9);
+}
+
+.search input::placeholder {
+  color: rgba(0, 0, 0, 0.45);
 }
 
 .session-list {
@@ -471,13 +551,15 @@ const formatSessionTime = (ts) => {
   margin-bottom: 8px;
 }
 
-.session-item:hover {
-  background: rgba(255, 107, 139, 0.08);
+@media (hover: hover) {
+  .session-item:hover {
+    background: rgba(217, 158, 130, 0.10);
+  }
 }
 
 .session-item.active {
-  background: rgba(255, 107, 139, 0.14);
-  border-color: rgba(255, 107, 139, 0.2);
+  background: rgba(217, 158, 130, 0.16);
+  border-color: rgba(217, 158, 130, 0.22);
 }
 
 .session-title {
@@ -493,35 +575,19 @@ const formatSessionTime = (ts) => {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
-}
-
-.main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+  color: var(--muted);
 }
 
 .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(10px);
 }
 
-.back {
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 12px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
+.topbar-left {
+  display: flex;
+  gap: 8px;
 }
 
 .topbar-center {
@@ -539,7 +605,7 @@ const formatSessionTime = (ts) => {
 
 .topbar-sub {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--muted);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -577,33 +643,116 @@ const formatSessionTime = (ts) => {
 }
 
 .ghost {
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.9);
   cursor: pointer;
 }
 
+.mobile-only {
+  display: none;
+}
+
+.desktop-only {
+  display: inline-flex;
+}
+
+@media (max-width: 900px) {
+  .mobile-only {
+    display: inline-flex;
+  }
+
+  .desktop-only {
+    display: none;
+  }
+}
+
 .chat-shell {
   flex: 1;
   min-height: 0;
-  padding: 16px;
 }
 
-.footer-container {
-  padding: 0 16px 16px;
+
+/* 右侧辅助区卡片 */
+.aux {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
-/* 响应式：移动端隐藏侧边栏 */
-@media (max-width: 900px) {
-  .sidebar {
-    display: none;
-  }
-  .chat-shell {
-    padding: 12px;
-  }
-  .footer-container {
-    padding: 0 12px 12px;
-  }
+.aux-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  padding: var(--space-2);
+}
+
+.aux-title {
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.aux-body {
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.kv:last-child {
+  border-bottom: none;
+}
+
+/* 移动端会话抽屉 */
+.drawer-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 60;
+}
+
+.drawer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(86vw, 360px);
+  z-index: 61;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-header {
+  padding: 12px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.drawer-title {
+  font-weight: 800;
+}
+
+.drawer-body {
+  padding: 12px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 </style>

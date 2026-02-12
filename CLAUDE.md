@@ -1,6 +1,13 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Important Restrictions
+
+- **DO NOT** run any `git` commands (`git commit`, `git push`, `git add`, `git checkout`, etc.). All version control is managed manually by the developer.
+- **DO NOT** modify or delete existing files unless explicitly instructed. Prefer creating new files.
+- **DO NOT** remove or comment out existing imports, beans, or configurations when adding new code.
+- **DO NOT** run tests that require API keys unless explicitly asked. Most tests need `RUN_AI_TESTS=true`.
+- **DO NOT** expose API keys, passwords, or secrets in code. Always use `${ENV_VAR}` or `@Value` injection.
 
 ## Build & Run Commands
 
@@ -145,3 +152,113 @@ Two vector store options in `src/main/java/com/yupi/yuaiagent/rag/`:
 - `spring-ai-core` is excluded from OpenAI and Ollama starters in `pom.xml` to avoid class conflicts with Spring AI 1.0.0 modular dependencies — be aware of this when adding new Spring AI starters
 - CORS is fully open (`CorsConfig` allows all origins with credentials)
 - Tool file storage base path: `FileConstant.FILE_SAVE_DIR` = `${user.dir}/tmp`
+# Logging Standards
+
+## General Principles
+
+- All critical business operations MUST have log statements. No business logic should run without logging ("no naked code").
+- Log levels must strictly follow: TRACE < DEBUG < INFO < WARN < ERROR < FATAL.
+- Production default log level is INFO. DEBUG/TRACE are only for local development and debugging.
+- Direct output via `System.out.println` / `print()` / `console.log()` is forbidden. Always use a logging framework.
+
+---
+
+## Mandatory Logging Scenarios
+
+### 1. API Entry and Exit
+
+All externally exposed API endpoints MUST log request parameters at entry and response results at exit.
+
+- Log Level: `INFO`
+- Format Example:
+
+```java
+log.info("[API-Name] Request: {}", JSON.toJSONString(request));
+log.info("[API-Name] Response: {}, Duration: {}ms", JSON.toJSONString(response), cost);
+```
+
+### 2. External Service Calls (RPC / HTTP / Third-Party API)
+
+Log request parameters before the call and response results with duration after the call. Exceptions MUST be logged at ERROR level with the full stack trace.
+
+- Log Level: `INFO` (normal) / `ERROR` (exception)
+- Format Example:
+
+```java
+log.info("[Call-XXService] Request: {}", request);
+log.info("[Call-XXService] Response: {}, Duration: {}ms", response, cost);
+log.error("[Call-XXService] Exception, Request: {}", request, e);
+```
+
+### 3. Key State Changes of Core Entities / DTOs / BOs
+
+Entity creation, update, and deletion operations MUST log the key fields before and after the change.
+
+- Log Level: `INFO`
+- Format Example:
+
+```java
+log.info("[Order-Create] orderId={}, userId={}, amount={}", order.getId(), order.getUserId(), order.getAmount());
+log.info("[Status-Change] orderId={}, oldStatus={}, newStatus={}", orderId, oldStatus, newStatus);
+```
+
+### 4. Conditional Branches and Business Decision Points
+
+When entering significant if/else or switch branches, log the conditions and the chosen path.
+
+- Log Level: `INFO` or `DEBUG`
+- Format Example:
+
+```java
+log.info("[Inventory-Check] skuId={}, currentStock={}, requiredQty={}, result={}", skuId, stock, required, sufficient ? "sufficient" : "insufficient");
+```
+
+### 5. Exception and Error Handling
+
+All catch blocks MUST contain a log statement. Empty catch blocks are forbidden. Use WARN for business exceptions and ERROR for system exceptions. The exception object `e` MUST be included to preserve the full stack trace.
+
+- Format Example:
+
+```java
+log.warn("[BizException] userId={}, reason: {}", userId, e.getMessage());
+log.error("[SysException] method={}, params={}", methodName, params, e);
+```
+
+### 6. Scheduled Tasks / Async Tasks
+
+Task start and completion MUST be logged, including the task name, data volume processed, and duration.
+
+- Log Level: `INFO`
+- Format Example:
+
+```java
+log.info("[ScheduledTask-XXX] Started");
+log.info("[ScheduledTask-XXX] Completed, totalProcessed={}, success={}, failed={}, duration={}ms", total, success, fail, cost);
+```
+
+---
+
+## Logging Rules
+
+| Rule | Description |
+|------|-------------|
+| Use Placeholders | Use `{}` placeholders instead of string concatenation to avoid performance overhead |
+| Data Masking | Sensitive fields such as phone numbers, ID cards, passwords, and tokens MUST be masked before logging |
+| Avoid Large Objects | When a list exceeds 20 items, log only the size instead of the full content |
+| TraceId Propagation | Ensure logs contain traceId / requestId for distributed tracing |
+| No Logging in Loops | Avoid INFO-level logs inside loops. Use DEBUG with frequency control if needed |
+| Safe toString | Ensure objects have a `toString()` method or use JSON serialization before logging to prevent NPE |
+
+---
+
+## Unified Log Format
+
+- Use square brackets for prefix tags: `[ModuleName-OperationName]`
+- Use `key=value` format for key fields to enable easy log searching
+- Example:
+
+```
+[OrderService-create] orderId=123, userId=456, amount=99.00
+```
+
+---

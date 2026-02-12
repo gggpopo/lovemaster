@@ -35,6 +35,9 @@ spring:
         options:
           model: doubao-seed-1-8-251228
       embedding:
+        # 火山引擎 Ark 的 OpenAI-Compatible Embeddings 路径为 /embeddings
+        # Spring AI 默认是 /v1/embeddings，会拼成 /api/v3/v1/embeddings 从而 404
+        embeddings-path: /embeddings
         options:
           model: doubao-embedding
 
@@ -75,7 +78,7 @@ app:
       # 用户画像异步上云最小间隔（毫秒），用于削峰；0 表示不限制
       profile-min-sync-interval-ms: 5000
     redis:
-      enabled: false  # 开关控制，设为 true 启用 Redis 记忆
+      enabled: true  # 开关控制，设为 true 启用 Redis 记忆
       ttl-minutes: 60  # 对话记忆过期时间（分钟）
       profile-ttl-days: 30  # 用户画像过期时间（天）
   # 工具开关配置
@@ -106,6 +109,8 @@ app:
 #      pgvector:
 #        index-type: HNSW
 #        dimensions: 1536
+
+
 #        distance-type: COSINE_DISTANCE
 #        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
 server:

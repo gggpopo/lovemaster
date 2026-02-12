@@ -26,10 +26,10 @@ defineProps({
 }
 
 .love {
-  background: linear-gradient(45deg, #ff6b8b, #ff8e8e);
+  background: linear-gradient(135deg, var(--primary), var(--accent-pink));
 }
 
 .default, .super {
-  background: linear-gradient(45deg, #3f51b5, #5677fc);
+  background: linear-gradient(135deg, var(--accent-blue), rgba(162, 187, 220, 0.55));
 }
 </style> 

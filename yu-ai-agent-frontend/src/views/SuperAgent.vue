@@ -1,34 +1,52 @@
 <template>
-  <div class="super-agent-container">
-    <div class="header">
-      <div class="back-button" @click="goBack">返回</div>
-      <h1 class="title">AI超级智能体</h1>
-      <div class="placeholder"></div>
-    </div>
-    
-    <div class="content-wrapper">
-      <div class="chat-area">
-        <ChatRoom 
-          :messages="messages" 
-          :connection-status="connectionStatus"
-          ai-type="super"
-          @send-message="sendMessage"
-        />
+  <AppShell>
+    <template #sidebar>
+      <div class="sidebar">
+        <div class="sidebar-title">快捷入口</div>
+        <div class="sidebar-desc">更快地开始一次高质量提问</div>
+
+        <div class="quick-list" role="list">
+          <button type="button" class="quick" @click="prefill('请帮我把这个需求拆解成可执行的步骤，并给出风险点与验收标准。')">任务拆解</button>
+          <button type="button" class="quick" @click="prefill('请你作为资深工程师，帮我做一次代码审查：列出潜在 bug、可维护性问题与优化建议。')">代码审查</button>
+          <button type="button" class="quick" @click="prefill('请用表格对比 3 种方案的优缺点、成本、适用场景，并给出推荐。')">方案对比</button>
+          <button type="button" class="quick" @click="prefill('请生成一份可直接执行的 TODO 列表，并按优先级排序。')">生成 TODO</button>
+        </div>
+
+        <div class="sidebar-actions">
+          <button type="button" class="ghost" @click="clearChat" :disabled="connectionStatus === 'connecting'">清空对话</button>
+          <button type="button" class="ghost" @click="goBack">返回首页</button>
+        </div>
       </div>
-    </div>
-    
-    <div class="footer-container">
-      <AppFooter />
-    </div>
-  </div>
+    </template>
+
+    <template #header>
+      <header class="topbar">
+        <div class="topbar-title">AI 超级智能体</div>
+        <div class="topbar-sub">
+          <span class="status-dot" :class="connectionStatus" aria-hidden="true" />
+          <span class="status-text">{{ statusText }}</span>
+        </div>
+      </header>
+    </template>
+
+    <section class="chat-shell">
+      <ChatRoom
+        :messages="messages"
+        :connection-status="connectionStatus"
+        ai-type="super"
+        :enable-images="false"
+        @send-message="sendMessage"
+      />
+    </section>
+  </AppShell>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
-import AppFooter from '../components/AppFooter.vue'
+import AppShell from '../components/AppShell.vue'
 import { chatWithManus } from '../api'
 
 // 设置页面标题和元数据
@@ -51,6 +69,12 @@ const messages = ref([])
 const connectionStatus = ref('disconnected')
 let eventSource = null
 
+const statusText = computed(() => {
+  if (connectionStatus.value === 'connecting') return '正在执行中…'
+  if (connectionStatus.value === 'error') return '连接异常'
+  return '就绪'
+})
+
 // 添加消息到列表
 const addMessage = (content, isUser, type = '') => {
   messages.value.push({
@@ -62,8 +86,11 @@ const addMessage = (content, isUser, type = '') => {
 }
 
 // 发送消息
-const sendMessage = (message) => {
-  addMessage(message, true, 'user-question')
+const sendMessage = (messageData) => {
+  const text = typeof messageData === 'string' ? messageData : (messageData?.text || '')
+  if (!text.trim()) return
+
+  addMessage(text, true, 'user-question')
   
   // 连接SSE
   if (eventSource) {
@@ -107,7 +134,7 @@ const sendMessage = (message) => {
     messageBuffer = []; // 清空缓冲区
   };
   
-  eventSource = chatWithManus(message)
+  eventSource = chatWithManus(text)
   
   // 监听SSE消息
   eventSource.onmessage = (event) => {
@@ -156,6 +183,21 @@ const sendMessage = (message) => {
   }
 }
 
+const clearChat = () => {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  connectionStatus.value = 'disconnected'
+  messages.value = []
+  addMessage('你好，我是AI超级智能体。我可以解答各类问题，提供专业建议，请问有什么可以帮助你的吗？', false)
+}
+
+const prefill = (text) => {
+  // 直接发送预设更符合“高频入口”的设计定位
+  sendMessage({ text })
+}
+
 // 返回主页
 const goBack = () => {
   router.push('/')
@@ -176,111 +218,101 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.super-agent-container {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  background-color: #f9fbff;
-}
-
-.header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  padding: 16px 24px;
-  background-color: #3f51b5;
-  color: white;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.back-button {
-  font-size: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  transition: opacity 0.2s;
-  justify-self: start;
-}
-
-.back-button:hover {
-  opacity: 0.8;
-}
-
-.back-button:before {
-  content: '←';
-  margin-right: 8px;
-}
-
-.title {
-  font-size: 20px;
-  font-weight: bold;
-  margin: 0;
-  text-align: center;
-  justify-self: center;
-}
-
-.placeholder {
-  width: 1px;
-  justify-self: end;
-}
-
-.content-wrapper {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.chat-area {
-  flex: 1;
+.sidebar {
   padding: 16px;
-  overflow: hidden;
-  position: relative;
-  /* 设置最小高度确保内容显示正常 */
-  min-height: calc(100vh - 56px - 180px); /* 100vh减去头部高度和页脚高度 */
-  margin-bottom: 16px; /* 为页脚留出空间 */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.footer-container {
-  margin-top: auto;
+.sidebar-title {
+  font-weight: 800;
+  color: #2f2f33;
 }
 
-/* 响应式样式 */
-@media (max-width: 768px) {
-  .header {
-    padding: 12px 16px;
-  }
-  
-  .title {
-    font-size: 18px;
-  }
-  
-  .chat-area {
-    padding: 12px;
-    min-height: calc(100vh - 48px - 160px); /* 调整计算值 */
-    margin-bottom: 12px;
+.sidebar-desc {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.quick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick {
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (hover: hover) {
+  .quick:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
   }
 }
 
-@media (max-width: 480px) {
-  .header {
-    padding: 10px 12px;
-  }
-  
-  .back-button {
-    font-size: 14px;
-  }
-  
-  .title {
-    font-size: 16px;
-  }
-  
-  .chat-area {
-    padding: 8px;
-    min-height: calc(100vh - 42px - 150px); /* 再次调整计算值 */
-    margin-bottom: 8px;
-  }
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
 }
-</style> 
+
+.ghost {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.ghost:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.topbar {
+  padding: 12px 16px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topbar-title {
+  font-weight: 800;
+  color: #2f2f33;
+}
+
+.topbar-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.status-dot.connecting {
+  background: #f59e0b;
+}
+
+.status-dot.error {
+  background: #ef4444;
+}
+
+.chat-shell {
+  flex: 1;
+  min-height: 0;
+}
+</style>

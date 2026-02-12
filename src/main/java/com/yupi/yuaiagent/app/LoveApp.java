@@ -3,6 +3,7 @@ package com.yupi.yuaiagent.app;
 import com.yupi.yuaiagent.advisor.MyLoggerAdvisor;
 import com.yupi.yuaiagent.advisor.CloudMemoryAdvisor;
 import com.yupi.yuaiagent.advisor.ReReadingAdvisor;
+import com.yupi.yuaiagent.chatmemory.TieredChatMemoryAdvisor;
 import com.yupi.yuaiagent.chatmemory.FileBasedChatMemory;
 import com.yupi.yuaiagent.rag.LoveAppRagCustomAdvisorFactory;
 import com.yupi.yuaiagent.rag.QueryRewriter;
@@ -21,6 +22,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.content.Media;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.util.MimeTypeUtils;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
@@ -41,7 +43,8 @@ public class LoveApp {
     private static final String SYSTEM_PROMPT = "扮演深耕恋爱心理领域的专家。开场向用户表明身份，告知用户可倾诉恋爱难题。" +
             "围绕单身、恋爱、已婚三种状态提问：单身状态询问社交圈拓展及追求心仪对象的困扰；" +
             "恋爱状态询问沟通、习惯差异引发的矛盾；已婚状态询问家庭责任与亲属关系处理的问题。" +
-            "引导用户详述事情经过、对方反应及自身想法，以便给出专属解决方案。";
+            "引导用户详述事情经过、对方反应及自身想法，以便给出专属解决方案。" +
+            "当用户询问去哪约会或推荐餐厅/景点/咖啡厅等地点时，优先调用约会地点推荐工具，输出带图片的地点卡片信息。";
 
     private static final String VISION_SYSTEM_PROMPT = """
             你是一个聊天记录分析专家，同时也是深耕恋爱心理领域的专家。请仔细分析用户上传的聊天截图。
@@ -156,18 +159,25 @@ public class LoveApp {
     @Autowired
     public LoveApp(ChatModel dashscopeChatModel,
                    @Autowired(required = false) ChatMemoryRepository chatMemoryRepository,
-                   @Autowired(required = false) CloudMemoryAdvisor cloudMemoryAdvisor) {
-        // 使用注入的 ChatMemoryRepository，如果没有则使用内存实现
-        ChatMemoryRepository repository = chatMemoryRepository != null
-                ? chatMemoryRepository
-                : new InMemoryChatMemoryRepository();
+                   @Autowired(required = false) CloudMemoryAdvisor cloudMemoryAdvisor,
+                   @Autowired(required = false) TieredChatMemoryAdvisor tieredChatMemoryAdvisor) {
 
-        MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
-                .chatMemoryRepository(repository)
-                .maxMessages(20)
-                .build();
         List<org.springframework.ai.chat.client.advisor.api.Advisor> advisors = new ArrayList<>();
-        advisors.add(MessageChatMemoryAdvisor.builder(chatMemory).build());
+
+        // 三层记忆（优先使用）；若未装配，则回退为默认滑动窗口记忆
+        if (tieredChatMemoryAdvisor != null) {
+            advisors.add(tieredChatMemoryAdvisor);
+        } else {
+            ChatMemoryRepository repository = chatMemoryRepository != null
+                    ? chatMemoryRepository
+                    : new InMemoryChatMemoryRepository();
+            MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
+                    .chatMemoryRepository(repository)
+                    .maxMessages(20)
+                    .build();
+            advisors.add(MessageChatMemoryAdvisor.builder(chatMemory).build());
+        }
+
         // 云端记忆增强（默认不启用，内部会检查 app.memory.cloud.enabled）
         if (cloudMemoryAdvisor != null) {
             advisors.add(cloudMemoryAdvisor);
@@ -308,13 +318,14 @@ public class LoveApp {
 
     // AI 恋爱知识库问答功能
 
-    @Resource
+    @Resource(name = "loveAppVectorStore")
     private VectorStore loveAppVectorStore;
 
     @Resource
     private Advisor loveAppRagCloudAdvisor;
 
-    @Resource
+    @Autowired(required = false)
+    @Qualifier("pgVectorVectorStore")
     private VectorStore pgVectorVectorStore;
 
     @Resource

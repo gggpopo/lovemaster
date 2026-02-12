@@ -2,6 +2,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
+    path: '/login',
+    redirect: '/' // 兼容本地环境里被误用的 /login
+  },
+  {
     path: '/',
     name: 'Home',
     component: () => import('../views/Home.vue'),
@@ -27,6 +31,10 @@ const routes = [
       title: 'AI超级智能体 - 小高AI超级智能体应用平台',
       description: 'AI超级智能体是小高AI超级智能体应用平台的全能助手，能解答各类专业问题，提供精准建议和解决方案'
     }
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/' // 未匹配路由统一回到首页
   }
 ]
 

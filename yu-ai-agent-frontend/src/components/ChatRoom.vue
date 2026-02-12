@@ -1,8 +1,13 @@
 <template>
   <div class="chat-container">
     <!-- 聊天记录区域 -->
-    <div class="chat-messages" ref="messagesContainer">
-      <div v-for="(msg, index) in messages" :key="index" class="message-wrapper">
+    <div class="chat-messages" ref="messagesContainer" role="log" aria-live="polite" aria-relevant="additions text">
+      <div
+        v-for="(msg, index) in messages"
+        :key="msg.id || (String(msg.time) + '-' + index)"
+        class="message-wrapper"
+        v-memo="[msg.id, msg.content, msg.isUser, msg.type, msg.time, msg.images && msg.images.length, index]"
+      >
         <!-- AI消息 -->
         <div v-if="!msg.isUser"
              class="message ai-message"
@@ -12,7 +17,24 @@
           </div>
           <div class="message-bubble">
             <div class="message-content">
-              {{ msg.content }}
+              <div
+                v-if="connectionStatus === 'connecting' && index === messages.length - 1 && !msg.content"
+                class="ai-skeleton"
+                aria-label="正在生成回复"
+              >
+                <div class="sk-line w60" />
+                <div class="sk-line w85" />
+                <div class="sk-line w40" />
+              </div>
+              <template v-for="(seg, segIndex) in getSegments(msg.content)" :key="segIndex">
+                <div v-if="seg.type === 'text'" class="message-text">{{ seg.content }}</div>
+                <div v-else-if="seg.type === 'image'" class="message-image-block">
+                  <a :href="seg.content" target="_blank" rel="noopener noreferrer">
+                    <img :src="seg.content" class="ai-message-image" loading="lazy" />
+                  </a>
+                </div>
+                <LocationCard v-else-if="seg.type === 'location_card'" v-bind="parseLocationCard(seg.content)" />
+              </template>
               <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
             </div>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
@@ -39,7 +61,7 @@
     <!-- 输入区域 -->
     <div class="chat-input-container" :class="{ 'has-preview': selectedImages.length > 0 }">
       <!-- 图片预览区 -->
-      <div v-if="selectedImages.length > 0" class="image-preview-area">
+      <div v-if="enableImages && selectedImages.length > 0" class="image-preview-area">
         <div v-for="(img, index) in selectedImages" :key="index" class="preview-item">
           <img :src="img" class="preview-image" />
           <button class="remove-image-btn" @click="removeImage(index)">×</button>
@@ -48,10 +70,18 @@
 
       <div class="chat-input">
         <!-- 附件按钮 -->
-        <button class="attach-button" @click="triggerFileInput" :disabled="connectionStatus === 'connecting'">
+        <button
+          v-if="enableImages"
+          class="attach-button"
+          type="button"
+          aria-label="上传图片"
+          @click="triggerFileInput"
+          :disabled="connectionStatus === 'connecting'"
+        >
           📎
         </button>
         <input
+          v-if="enableImages"
           type="file"
           ref="fileInput"
           @change="handleFileSelect"
@@ -71,7 +101,8 @@
         <button
           @click="sendMessage"
           class="send-button"
-          :disabled="connectionStatus === 'connecting' || (!inputMessage.trim() && selectedImages.length === 0)"
+          :disabled="connectionStatus === 'connecting' || (!inputMessage.trim() && (!enableImages || selectedImages.length === 0))"
+          aria-label="发送消息"
         >发送</button>
       </div>
     </div>
@@ -79,8 +110,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
+import { ref, onMounted, nextTick, watch, computed } from 'vue'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import LocationCard from './LocationCard.vue'
+import { parseMessage } from '../utils/messageParser'
 
 const props = defineProps({
   messages: {
@@ -94,6 +127,10 @@ const props = defineProps({
   aiType: {
     type: String,
     default: 'default'  // 'love' 或 'super'
+  },
+  enableImages: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -103,6 +140,18 @@ const inputMessage = ref('')
 const messagesContainer = ref(null)
 const fileInput = ref(null)
 const selectedImages = ref([])
+
+const getSegments = (content) => {
+  return parseMessage(content)
+}
+
+const parseLocationCard = (jsonText) => {
+  try {
+    return JSON.parse(jsonText)
+  } catch (e) {
+    return { name: '地点信息解析失败', address: '', rating: '', cost: '', tel: '', photos: [], mapUrl: '' }
+  }
+}
 
 // 图片大小限制 5MB
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
@@ -149,6 +198,7 @@ const handleFileSelect = (event) => {
 
 // 支持 Cmd+V / Ctrl+V 粘贴图片
 const handlePaste = (event) => {
+  if (!props.enableImages) return
   const clipboardData = event.clipboardData
   if (!clipboardData || !clipboardData.items) return
 
@@ -188,12 +238,12 @@ const removeImage = (index) => {
 
 // 发送消息
 const sendMessage = () => {
-  if (!inputMessage.value.trim() && selectedImages.value.length === 0) return
+  if (!inputMessage.value.trim() && (!props.enableImages || selectedImages.value.length === 0)) return
 
   // 发送消息和图片
   emit('send-message', {
     text: inputMessage.value,
-    images: [...selectedImages.value]
+    images: props.enableImages ? [...selectedImages.value] : []
   })
 
   inputMessage.value = ''
@@ -207,11 +257,15 @@ const formatTime = (timestamp) => {
 }
 
 // 自动滚动到底部
+let rafId = 0
 const scrollToBottom = async () => {
   await nextTick()
-  if (messagesContainer.value) {
+  if (!messagesContainer.value) return
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(() => {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-  }
+    rafId = 0
+  })
 }
 
 // 监听消息变化与内容变化，自动滚动
@@ -219,7 +273,7 @@ watch(() => props.messages.length, () => {
   scrollToBottom()
 })
 
-watch(() => props.messages.map(m => m.content).join(''), () => {
+watch(() => props.messages[props.messages.length - 1]?.content, () => {
   scrollToBottom()
 })
 
@@ -232,12 +286,13 @@ onMounted(() => {
 .chat-container {
   display: flex;
   flex-direction: column;
+  flex: 1;
   height: 100%;
   min-height: 0;
-  background-color: rgba(255, 255, 255, 0.65);
-  border-radius: 16px;
+  background-color: rgba(255, 255, 255, 0.72);
+  border-radius: var(--radius-2);
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border);
   backdrop-filter: blur(10px);
 }
 
@@ -298,8 +353,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #007bff;
-  color: white;
+  background: rgba(162, 187, 220, 0.55);
+  color: #1f2937;
   font-weight: bold;
 }
 
@@ -309,20 +364,56 @@ onMounted(() => {
   position: relative;
   word-wrap: break-word;
   min-width: 100px; /* 最小宽度 */
+  border: 1px solid transparent;
 }
 
 .user-message .message-bubble {
-  background-color: #007bff;
-  color: white;
+  background-color: var(--surface);
+  color: var(--text);
+  border-color: rgba(217, 158, 130, 0.26);
   border-bottom-right-radius: 4px;
   text-align: left;
 }
 
 .ai-message .message-bubble {
-  background-color: #e9e9eb;
-  color: #333;
+  background-color: rgba(253, 251, 247, 0.92);
+  color: var(--text);
+  border-color: var(--border);
   border-bottom-left-radius: 4px;
   text-align: left;
+}
+
+.ai-skeleton {
+  padding: 2px 0;
+}
+
+.sk-line {
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.06) 0%,
+    rgba(0, 0, 0, 0.12) 40%,
+    rgba(0, 0, 0, 0.06) 80%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+  margin: 10px 0;
+}
+
+.sk-line.w60 { width: 60%; }
+.sk-line.w85 { width: 85%; }
+.sk-line.w40 { width: 40%; }
+
+@keyframes shimmer {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-line {
+    animation: none;
+  }
 }
 
 .message-content {
@@ -340,7 +431,7 @@ onMounted(() => {
 
 .chat-input-container {
   background-color: rgba(255, 255, 255, 0.85);
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid var(--border);
   min-height: 72px;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.04);
 }
@@ -414,7 +505,7 @@ onMounted(() => {
 }
 
 .attach-button:hover:not(:disabled) {
-  background-color: #f0f0f0;
+  background-color: rgba(217, 158, 130, 0.10);
 }
 
 .attach-button:disabled {
@@ -436,9 +527,22 @@ onMounted(() => {
   object-fit: cover;
 }
 
+.message-image-block {
+  margin: 8px 0;
+}
+
+.ai-message-image {
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: 10px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
 .input-box {
   flex-grow: 1;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 20px;
   padding: 10px 16px;
   font-size: 16px;
@@ -458,12 +562,12 @@ onMounted(() => {
 }
 
 .input-box:focus {
-  border-color: #007bff;
+  border-color: rgba(217, 158, 130, 0.55);
 }
 
 .send-button {
   margin-left: 12px;
-  background-color: #007bff;
+  background-color: var(--primary);
   color: white;
   border: none;
   border-radius: 20px;
@@ -476,7 +580,7 @@ onMounted(() => {
 }
 
 .send-button:hover:not(:disabled) {
-  background-color: #0069d9;
+  background-color: var(--primary-strong);
 }
 
 .typing-indicator {
@@ -572,4 +676,4 @@ onMounted(() => {
 .ai-message + .ai-message .message-bubble {
   border-top-left-radius: 10px;
 }
-</style> 
+</style>

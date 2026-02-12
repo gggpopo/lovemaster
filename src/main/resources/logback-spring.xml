@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
+    <!-- 引入 Spring Boot Logback 扩展（注册 %clr 等转换器），否则会报：There is no conversion class registered for [clr] -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
     <property name="LOG_DIR" value="logs"/>
     <property name="LOG_PATTERN"
               value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{traceId}] %-5level %logger{36} - %msg%n"/>
