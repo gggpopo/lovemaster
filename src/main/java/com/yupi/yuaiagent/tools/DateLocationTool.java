@@ -137,11 +137,11 @@ public class DateLocationTool {
                         .append(" | 💰").append(StringUtils.hasText(cost) ? (cost + "元") : "暂无")
                         .append(" | 📍").append(StringUtils.hasText(address) ? address : "暂无")
                         .append(" | 📞").append(StringUtils.hasText(tel) ? tel : "暂无")
-                        .append(" | 📸有").append(photos.size()).append("张实景图")
+                        .append(photos.isEmpty() ? " | 📸暂无实景图" : " | 📸已附实景图")
                         .append("\n\n");
             }
 
-            sb.append("共找到 ").append(limit).append(" 个推荐地点，带📸标记的地点有实景图片可以查看。\n");
+            sb.append("共找到 ").append(limit).append(" 个推荐地点，地点卡片会展示可访问的实景图片。\n");
             log.info("[DateLocationTool] searchDateLocations done, count={}, withPhotos={}, costMs={}",
                     limit, withPhotos, System.currentTimeMillis() - startMs);
             return sb.toString();

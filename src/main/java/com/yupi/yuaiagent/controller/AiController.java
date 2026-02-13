@@ -14,6 +14,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import static com.yupi.yuaiagent.util.LogFieldUtil.kv;
 
 @Slf4j
 @RestController
@@ -38,11 +39,13 @@ public class AiController {
      */
     @GetMapping("/love_app/chat/sync")
     public String doChatWithLoveAppSync(String message, String chatId) {
-        log.info("[AiController-doChatWithLoveAppSync] Request: message={}, chatId={}", message, chatId);
+        log.info("[AiController-doChatWithLoveAppSync] {}",
+                kv("chatId", chatId, "messageLength", message == null ? 0 : message.length(), "message", message));
         long start = System.currentTimeMillis();
         String result = loveApp.doChat(message, chatId);
         long cost = System.currentTimeMillis() - start;
-        log.info("[AiController-doChatWithLoveAppSync] Response: duration={}ms", cost);
+        log.info("[AiController-doChatWithLoveAppSync] {}",
+                kv("chatId", chatId, "durationMs", cost, "responseLength", result == null ? 0 : result.length(), "response", result));
         return result;
     }
 
@@ -55,8 +58,14 @@ public class AiController {
      */
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> doChatWithLoveAppSSE(String message, String chatId) {
-        log.info("[AiController-doChatWithLoveAppSSE] Request: message={}, chatId={}", message, chatId);
-        return loveApp.doChatByStream(message, chatId);
+        log.info("[AiController-doChatWithLoveAppSSE] {}",
+                kv("chatId", chatId, "messageLength", message == null ? 0 : message.length(), "message", message));
+        long start = System.currentTimeMillis();
+        return loveApp.doChatByStream(message, chatId)
+                .doOnComplete(() -> log.info("[AiController-doChatWithLoveAppSSE] {}",
+                        kv("chatId", chatId, "status", "completed", "durationMs", System.currentTimeMillis() - start)))
+                .doOnError(e -> log.error("[AiController-doChatWithLoveAppSSE] {}",
+                        kv("chatId", chatId, "status", "error", "durationMs", System.currentTimeMillis() - start), e));
     }
 
     /**
@@ -68,11 +77,17 @@ public class AiController {
      */
     @GetMapping(value = "/love_app/chat/server_sent_event")
     public Flux<ServerSentEvent<String>> doChatWithLoveAppServerSentEvent(String message, String chatId) {
-        log.info("[AiController-doChatWithLoveAppServerSentEvent] Request: message={}, chatId={}", message, chatId);
+        log.info("[AiController-doChatWithLoveAppServerSentEvent] {}",
+                kv("chatId", chatId, "messageLength", message == null ? 0 : message.length(), "message", message));
+        long start = System.currentTimeMillis();
         return loveApp.doChatByStream(message, chatId)
                 .map(chunk -> ServerSentEvent.<String>builder()
                         .data(chunk)
-                        .build());
+                        .build())
+                .doOnComplete(() -> log.info("[AiController-doChatWithLoveAppServerSentEvent] {}",
+                        kv("chatId", chatId, "status", "completed", "durationMs", System.currentTimeMillis() - start)))
+                .doOnError(e -> log.error("[AiController-doChatWithLoveAppServerSentEvent] {}",
+                        kv("chatId", chatId, "status", "error", "durationMs", System.currentTimeMillis() - start), e));
     }
 
     /**
@@ -84,7 +99,9 @@ public class AiController {
      */
     @GetMapping(value = "/love_app/chat/sse_emitter")
     public SseEmitter doChatWithLoveAppServerSseEmitter(String message, String chatId) {
-        log.info("[AiController-doChatWithLoveAppServerSseEmitter] Request: message={}, chatId={}", message, chatId);
+        log.info("[AiController-doChatWithLoveAppServerSseEmitter] {}",
+                kv("chatId", chatId, "messageLength", message == null ? 0 : message.length(), "message", message));
+        long start = System.currentTimeMillis();
         // 创建一个超时时间较长的 SseEmitter
         SseEmitter sseEmitter = new SseEmitter(180000L); // 3 分钟超时
         // 获取 Flux 响应式数据流并且直接通过订阅推送给 SseEmitter
@@ -93,9 +110,19 @@ public class AiController {
                     try {
                         sseEmitter.send(chunk);
                     } catch (IOException e) {
+                        log.error("[AiController-doChatWithLoveAppServerSseEmitter] {}",
+                                kv("chatId", chatId, "status", "send_error"), e);
                         sseEmitter.completeWithError(e);
                     }
-                }, sseEmitter::completeWithError, sseEmitter::complete);
+                }, e -> {
+                    log.error("[AiController-doChatWithLoveAppServerSseEmitter] {}",
+                            kv("chatId", chatId, "status", "error", "durationMs", System.currentTimeMillis() - start), e);
+                    sseEmitter.completeWithError(e);
+                }, () -> {
+                    log.info("[AiController-doChatWithLoveAppServerSseEmitter] {}",
+                            kv("chatId", chatId, "status", "completed", "durationMs", System.currentTimeMillis() - start));
+                    sseEmitter.complete();
+                });
         // 返回
         return sseEmitter;
     }
@@ -108,9 +135,18 @@ public class AiController {
      */
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(String message) {
-        log.info("[AiController-doChatWithManus] Request: message={}", message);
+        log.info("[AiController-doChatWithManus] {}",
+                kv("messageLength", message == null ? 0 : message.length(), "message", message));
+        long start = System.currentTimeMillis();
         YuManus yuManus = new YuManus(allTools, chatModel);
-        return yuManus.runStream(message);
+        SseEmitter emitter = yuManus.runStream(message);
+        emitter.onCompletion(() -> log.info("[AiController-doChatWithManus] {}",
+                kv("status", "completed", "durationMs", System.currentTimeMillis() - start)));
+        emitter.onTimeout(() -> log.warn("[AiController-doChatWithManus] {}",
+                kv("status", "timeout", "durationMs", System.currentTimeMillis() - start)));
+        emitter.onError(e -> log.error("[AiController-doChatWithManus] {}",
+                kv("status", "error", "durationMs", System.currentTimeMillis() - start), e));
+        return emitter;
     }
 
     /**
@@ -121,9 +157,16 @@ public class AiController {
      */
     @PostMapping(value = "/love_app/chat/vision", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> doChatWithLoveAppVision(@RequestBody VisionChatRequest request) {
-        log.info("[AiController-doChatWithLoveAppVision] Request: message={}, chatId={}, imageCount={}",
-                request.getMessage(), request.getChatId(),
-                request.getImages() != null ? request.getImages().size() : 0);
-        return loveApp.doChatWithVision(request.getMessage(), request.getChatId(), request.getImages());
+        String message = request == null ? null : request.getMessage();
+        String chatId = request == null ? null : request.getChatId();
+        int imageCount = request == null || request.getImages() == null ? 0 : request.getImages().size();
+        log.info("[AiController-doChatWithLoveAppVision] {}",
+                kv("chatId", chatId, "messageLength", message == null ? 0 : message.length(), "imageCount", imageCount));
+        long start = System.currentTimeMillis();
+        return loveApp.doChatWithVision(message, chatId, request == null ? null : request.getImages())
+                .doOnComplete(() -> log.info("[AiController-doChatWithLoveAppVision] {}",
+                        kv("chatId", chatId, "status", "completed", "durationMs", System.currentTimeMillis() - start)))
+                .doOnError(e -> log.error("[AiController-doChatWithLoveAppVision] {}",
+                        kv("chatId", chatId, "status", "error", "durationMs", System.currentTimeMillis() - start), e));
     }
 }

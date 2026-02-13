@@ -3,6 +3,7 @@ package com.yupi.yuaiagent.chatmemory;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
+import lombok.extern.slf4j.Slf4j;
 import org.objenesis.strategy.StdInstantiatorStrategy;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
@@ -14,9 +15,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.yupi.yuaiagent.util.LogFieldUtil.kv;
+
 /**
  * 基于文件持久化的对话记忆
  */
+@Slf4j
 public class FileBasedChatMemory implements ChatMemory {
 
     private final String BASE_DIR;
@@ -33,7 +37,8 @@ public class FileBasedChatMemory implements ChatMemory {
         this.BASE_DIR = dir;
         File baseDir = new File(dir);
         if (!baseDir.exists()) {
-            baseDir.mkdirs();
+            boolean created = baseDir.mkdirs();
+            log.info("[FileBasedChatMemory-init] {}", kv("baseDir", dir, "created", created));
         }
     }
 
@@ -42,18 +47,27 @@ public class FileBasedChatMemory implements ChatMemory {
         List<Message> conversationMessages = getOrCreateConversation(conversationId);
         conversationMessages.addAll(messages);
         saveConversation(conversationId, conversationMessages);
+        log.info("[FileBasedChatMemory-add] {}",
+                kv("conversationId", conversationId,
+                        "incomingMessageCount", messages == null ? 0 : messages.size(),
+                        "totalMessageCount", conversationMessages.size()));
     }
 
     @Override
     public List<Message> get(String conversationId) {
-        return getOrCreateConversation(conversationId);
+        List<Message> messages = getOrCreateConversation(conversationId);
+        log.debug("[FileBasedChatMemory-get] {}",
+                kv("conversationId", conversationId, "messageCount", messages.size()));
+        return messages;
     }
 
     @Override
     public void clear(String conversationId) {
         File file = getConversationFile(conversationId);
         if (file.exists()) {
-            file.delete();
+            boolean deleted = file.delete();
+            log.info("[FileBasedChatMemory-clear] {}",
+                    kv("conversationId", conversationId, "deleted", deleted));
         }
     }
 
@@ -64,7 +78,8 @@ public class FileBasedChatMemory implements ChatMemory {
             try (Input input = new Input(new FileInputStream(file))) {
                 messages = kryo.readObject(input, ArrayList.class);
             } catch (IOException e) {
-                e.printStackTrace();
+                log.error("[FileBasedChatMemory-getOrCreateConversation] {}",
+                        kv("conversationId", conversationId, "filePath", file.getAbsolutePath(), "status", "read_error"), e);
             }
         }
         return messages;
@@ -75,7 +90,11 @@ public class FileBasedChatMemory implements ChatMemory {
         try (Output output = new Output(new FileOutputStream(file))) {
             kryo.writeObject(output, messages);
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("[FileBasedChatMemory-saveConversation] {}",
+                    kv("conversationId", conversationId,
+                            "filePath", file.getAbsolutePath(),
+                            "messageCount", messages == null ? 0 : messages.size(),
+                            "status", "write_error"), e);
         }
     }
 

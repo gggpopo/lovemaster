@@ -4,6 +4,8 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 
+import static com.yupi.yuaiagent.util.LogFieldUtil.kv;
+
 /**
  * ReAct (Reasoning and Acting) 模式的代理抽象类
  * 实现了思考-行动的循环模式
@@ -35,16 +37,26 @@ public abstract class ReActAgent extends BaseAgent {
     @Override
     public String step() {
         try {
+            log.info("[ReActAgent-step] {}", kv("status", "start", "agent", getClass().getSimpleName()));
             // 先思考
             boolean shouldAct = think();
             if (!shouldAct) {
+                log.info("[ReActAgent-step] {}",
+                        kv("status", "skip_act", "agent", getClass().getSimpleName(), "shouldAct", false));
                 return "思考完成 - 无需行动";
             }
             // 再行动
-            return act();
+            String result = act();
+            log.info("[ReActAgent-step] {}",
+                    kv("status", "completed",
+                            "agent", getClass().getSimpleName(),
+                            "shouldAct", true,
+                            "resultLength", result == null ? 0 : result.length(),
+                            "result", result));
+            return result;
         } catch (Exception e) {
-            // 记录异常日志
-            e.printStackTrace();
+            log.error("[ReActAgent-step] {}",
+                    kv("status", "error", "agent", getClass().getSimpleName()), e);
             return "步骤执行失败：" + e.getMessage();
         }
     }

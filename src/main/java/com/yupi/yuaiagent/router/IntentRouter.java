@@ -108,7 +108,11 @@ public class IntentRouter {
                     "恐怖袭击|极端主义)"
     );
 
-    private static final Pattern DATE_PLANNING_PATTERN = Pattern.compile("去哪|约会|餐厅|电影院|景点");
+    private static final Pattern DATE_PLANNING_PATTERN = Pattern.compile(
+            "去哪|约会|餐厅|电影院|景点|美食|好吃|探店|吃什么|店铺|"
+                    + "推荐(?:一下|些)?(?:店|餐厅|饭店|馆子|火锅|烤肉|烧烤|咖啡|咖啡店|甜品)|"
+                    + "附近(?:美食|好吃|餐厅|吃的)|打卡"
+    );
     private static final Pattern GIFT_ADVICE_PATTERN = Pattern.compile("送什么|礼物|纪念日");
     private static final Pattern LOVE_COPYWRITING_PATTERN = Pattern.compile("写一段|表白|情话|文案");
     private static final Pattern IMAGE_REQUEST_PATTERN = Pattern.compile("找图|图片|壁纸");
@@ -229,6 +233,8 @@ public class IntentRouter {
             return r;
         }
         if (DATE_PLANNING_PATTERN.matcher(msg).find()) {
+            log.info("[IntentRouter-keyword] userId={} intent={} msgLen={}",
+                    userId, IntentType.DATE_PLANNING, msg.length());
             RouteResult r = buildResult(IntentType.DATE_PLANNING, 0.92);
             log.info("[INTENT] userId={} intent={} confidence={} cost={}ms", userId, r.getIntentType(), r.getConfidence(), System.currentTimeMillis() - startMs);
             return r;

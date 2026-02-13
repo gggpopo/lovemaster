@@ -10,6 +10,8 @@ import org.springframework.ai.chat.client.advisor.api.StreamAdvisor;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import reactor.core.publisher.Flux;
 
+import static com.yupi.yuaiagent.util.LogFieldUtil.kv;
+
 /**
  * 自定义日志 Advisor
  * 打印 info 级别日志、只输出单次用户提示词和 AI 回复的文本
@@ -28,26 +30,41 @@ public class MyLoggerAdvisor implements CallAdvisor, StreamAdvisor {
 	}
 
 	private ChatClientRequest before(ChatClientRequest request) {
-		log.info("AI Request: {}", request.prompt());
+		log.info("[MyLoggerAdvisor-before] {}",
+				kv("advisor", getName(), "prompt", request.prompt()));
 		return request;
 	}
 
-	private void observeAfter(ChatClientResponse chatClientResponse) {
-		log.info("AI Response: {}", chatClientResponse.chatResponse().getResult().getOutput().getText());
+	private void observeAfter(ChatClientResponse chatClientResponse, long start, String mode) {
+		String response = chatClientResponse == null
+				|| chatClientResponse.chatResponse() == null
+				|| chatClientResponse.chatResponse().getResult() == null
+				|| chatClientResponse.chatResponse().getResult().getOutput() == null
+				? ""
+				: chatClientResponse.chatResponse().getResult().getOutput().getText();
+		log.info("[MyLoggerAdvisor-after] {}",
+				kv("advisor", getName(),
+						"mode", mode,
+						"durationMs", System.currentTimeMillis() - start,
+						"responseLength", response == null ? 0 : response.length(),
+						"response", response));
 	}
 
 	@Override
 	public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain chain) {
+		long start = System.currentTimeMillis();
 		chatClientRequest = before(chatClientRequest);
 		ChatClientResponse chatClientResponse = chain.nextCall(chatClientRequest);
-		observeAfter(chatClientResponse);
+		observeAfter(chatClientResponse, start, "call");
 		return chatClientResponse;
 	}
 
 	@Override
 	public Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain chain) {
+		long start = System.currentTimeMillis();
 		chatClientRequest = before(chatClientRequest);
 		Flux<ChatClientResponse> chatClientResponseFlux = chain.nextStream(chatClientRequest);
-		return (new ChatClientMessageAggregator()).aggregateChatClientResponse(chatClientResponseFlux, this::observeAfter);
+		return (new ChatClientMessageAggregator()).aggregateChatClientResponse(chatClientResponseFlux,
+				response -> observeAfter(response, start, "stream"));
 	}
 }

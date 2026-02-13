@@ -32,13 +32,51 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import static com.yupi.yuaiagent.util.LogFieldUtil.kv;
 
 @Component
 @Slf4j
 public class LoveApp {
 
     private final ChatClient chatClient;
+
+    /**
+     * 用户态工具调用的安全白名单：
+     * - 只允许与恋爱咨询/地点推荐相关的低风险工具
+     * - 避免 expose doTerminate/终端/文件系统等“任务型工具”干扰用户问答
+     */
+    private static final Set<String> SAFE_CHAT_TOOL_NAMES = Set.of(
+            "searchDateLocations",
+            "queryWeather",
+            "detectEmotion",
+            "searchWeb",
+            "recommendSticker",
+            "checkContentSafety",
+            "filterSensitiveContent",
+            "convertTone",
+            "listToneStyles",
+            "calculateAnniversary",
+            "getUpcomingFestivals",
+            "suggestDateByDate"
+    );
+
+    /**
+     * 编排层工具别名 -> 实际 Tool 方法名
+     */
+    private static final Map<String, Set<String>> TOOL_ALIAS_NAME_MAP = Map.of(
+            "dateLocation", Set.of("searchDateLocations"),
+            "weather", Set.of("queryWeather"),
+            "emotionDetection", Set.of("detectEmotion"),
+            "webSearch", Set.of("searchWeb"),
+            "giftRecommend", Set.of("searchWeb"),
+            "imageSearch", Set.of("searchWeb")
+    );
 
     private static final String SYSTEM_PROMPT = "扮演深耕恋爱心理领域的专家。开场向用户表明身份，告知用户可倾诉恋爱难题。" +
             "围绕单身、恋爱、已婚三种状态提问：单身状态询问社交圈拓展及追求心仪对象的困扰；" +
@@ -201,6 +239,11 @@ public class LoveApp {
      * @return
      */
     public String doChat(String message, String chatId) {
+        log.info("[LoveApp-doChat] {}",
+                kv("chatId", chatId,
+                        "messageLength", message == null ? 0 : message.length(),
+                        "message", message));
+        long start = System.currentTimeMillis();
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(message)
@@ -208,7 +251,12 @@ public class LoveApp {
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        long cost = System.currentTimeMillis() - start;
+        log.info("[LoveApp-doChat] {}",
+                kv("chatId", chatId,
+                        "durationMs", cost,
+                        "responseLength", content == null ? 0 : content.length(),
+                        "response", content));
         return content;
     }
 
@@ -220,6 +268,11 @@ public class LoveApp {
      * @return
      */
     public Flux<String> doChatByStream(String message, String chatId) {
+        log.info("[LoveApp-doChatByStream] {}",
+                kv("chatId", chatId,
+                        "messageLength", message == null ? 0 : message.length(),
+                        "message", message));
+        long start = System.currentTimeMillis();
         return chatClient
                 .prompt()
                 .user(message)
@@ -227,7 +280,11 @@ public class LoveApp {
                 .stream()
                 .content()
                 // 前端通过 [DONE] 判断流式结束
-                .concatWithValues("[DONE]");
+                .concatWithValues("[DONE]")
+                .doOnComplete(() -> log.info("[LoveApp-doChatByStream] {}",
+                        kv("chatId", chatId, "status", "completed", "durationMs", System.currentTimeMillis() - start)))
+                .doOnError(e -> log.error("[LoveApp-doChatByStream] {}",
+                        kv("chatId", chatId, "status", "error", "durationMs", System.currentTimeMillis() - start), e));
     }
 
     /**
@@ -239,6 +296,12 @@ public class LoveApp {
      * @return
      */
     public Flux<String> doChatWithVision(String message, String chatId, List<String> images) {
+        int imageCount = images == null ? 0 : images.size();
+        log.info("[LoveApp-doChatWithVision] {}",
+                kv("chatId", chatId,
+                        "messageLength", message == null ? 0 : message.length(),
+                        "imageCount", imageCount));
+        long start = System.currentTimeMillis();
         // 构建多模态内容
         List<Object> contentList = new ArrayList<>();
 
@@ -290,7 +353,11 @@ public class LoveApp {
                 .content()
                 .transform(LoveApp::keepUserFacingVisionPart)
                 // 前端通过 [DONE] 判断流式结束
-                .concatWithValues("[DONE]");
+                .concatWithValues("[DONE]")
+                .doOnComplete(() -> log.info("[LoveApp-doChatWithVision] {}",
+                        kv("chatId", chatId, "status", "completed", "durationMs", System.currentTimeMillis() - start)))
+                .doOnError(e -> log.error("[LoveApp-doChatWithVision] {}",
+                        kv("chatId", chatId, "status", "error", "durationMs", System.currentTimeMillis() - start), e));
     }
 
     record LoveReport(String title, List<String> suggestions) {
@@ -305,6 +372,11 @@ public class LoveApp {
      * @return
      */
     public LoveReport doChatWithReport(String message, String chatId) {
+        log.info("[LoveApp-doChatWithReport] {}",
+                kv("chatId", chatId,
+                        "messageLength", message == null ? 0 : message.length(),
+                        "message", message));
+        long start = System.currentTimeMillis();
         LoveReport loveReport = chatClient
                 .prompt()
                 .system(SYSTEM_PROMPT + "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
@@ -312,7 +384,12 @@ public class LoveApp {
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 .call()
                 .entity(LoveReport.class);
-        log.info("loveReport: {}", loveReport);
+        long cost = System.currentTimeMillis() - start;
+        log.info("[LoveApp-doChatWithReport] {}",
+                kv("chatId", chatId,
+                        "durationMs", cost,
+                        "suggestionCount", loveReport == null || loveReport.suggestions() == null ? 0 : loveReport.suggestions().size(),
+                        "loveReport", loveReport));
         return loveReport;
     }
 
@@ -323,6 +400,9 @@ public class LoveApp {
 
     @Resource
     private Advisor loveAppRagCloudAdvisor;
+
+    @Resource(name = "loveAppRagAdvisor")
+    private Advisor loveAppRagAdvisor;
 
     @Autowired(required = false)
     @Qualifier("pgVectorVectorStore")
@@ -339,8 +419,17 @@ public class LoveApp {
      * @return
      */
     public String doChatWithRag(String message, String chatId) {
+        log.info("[LoveApp-doChatWithRag] {}",
+                kv("chatId", chatId,
+                        "messageLength", message == null ? 0 : message.length(),
+                        "message", message));
+        long start = System.currentTimeMillis();
         // 查询重写
         String rewrittenMessage = queryRewriter.doQueryRewrite(message);
+        log.info("[LoveApp-doChatWithRag] {}",
+                kv("chatId", chatId,
+                        "rewrittenMessageLength", rewrittenMessage == null ? 0 : rewrittenMessage.length(),
+                        "rewrittenMessage", rewrittenMessage));
         ChatResponse chatResponse = chatClient
                 .prompt()
                 // 使用改写后的查询
@@ -349,7 +438,7 @@ public class LoveApp {
                 // 开启日志，便于观察效果
                 .advisors(new MyLoggerAdvisor())
                 // 应用 RAG 知识库问答
-                .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
+                .advisors(loveAppRagAdvisor)
                 // 应用 RAG 检索增强服务（基于云知识库服务）
 //                .advisors(loveAppRagCloudAdvisor)
                 // 应用 RAG 检索增强服务（基于 PgVector 向量存储）
@@ -363,7 +452,12 @@ public class LoveApp {
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        long cost = System.currentTimeMillis() - start;
+        log.info("[LoveApp-doChatWithRag] {}",
+                kv("chatId", chatId,
+                        "durationMs", cost,
+                        "responseLength", content == null ? 0 : content.length(),
+                        "response", content));
         return content;
     }
 
@@ -379,18 +473,115 @@ public class LoveApp {
      * @return
      */
     public String doChatWithTools(String message, String chatId) {
+        return doChatWithTools(message, chatId, Set.of());
+    }
+
+    /**
+     * AI 恋爱报告功能（支持调用工具 + 按编排建议收敛工具范围）
+     *
+     * @param message            用户消息
+     * @param chatId             会话 ID
+     * @param suggestedToolAlias 编排层建议工具别名（例如 dateLocation / weather）
+     * @return 模型回复
+     */
+    public String doChatWithTools(String message, String chatId, Set<String> suggestedToolAlias) {
+        ToolCallback[] selectedTools = selectToolsForToolChat(allTools, suggestedToolAlias);
+        List<String> selectedToolNames = extractToolNames(selectedTools);
+
+        log.info("[LoveApp-doChatWithTools] {}",
+                kv("chatId", chatId,
+                        "messageLength", message == null ? 0 : message.length(),
+                        "toolCount", allTools == null ? 0 : allTools.length,
+                        "selectedToolCount", selectedTools.length,
+                        "selectedTools", selectedToolNames,
+                        "suggestedToolAlias", suggestedToolAlias,
+                        "message", message));
+        long start = System.currentTimeMillis();
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(message)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 // 开启日志，便于观察效果
                 .advisors(new MyLoggerAdvisor())
-                .toolCallbacks(allTools)
+                .toolCallbacks(selectedTools)
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        long cost = System.currentTimeMillis() - start;
+        log.info("[LoveApp-doChatWithTools] {}",
+                kv("chatId", chatId,
+                        "durationMs", cost,
+                        "responseLength", content == null ? 0 : content.length(),
+                        "response", content));
         return content;
+    }
+
+    static ToolCallback[] selectToolsForToolChat(ToolCallback[] allTools, Set<String> suggestedToolAlias) {
+        if (allTools == null || allTools.length == 0) {
+            return new ToolCallback[0];
+        }
+
+        List<ToolCallback> safeTools = new ArrayList<>();
+        for (ToolCallback tool : allTools) {
+            String toolName = safeToolName(tool);
+            if (SAFE_CHAT_TOOL_NAMES.contains(toolName)) {
+                safeTools.add(tool);
+            }
+        }
+
+        if (safeTools.isEmpty()) {
+            return allTools;
+        }
+
+        Set<String> preferredAliases = suggestedToolAlias == null
+                ? Set.of()
+                : suggestedToolAlias.stream()
+                .filter(s -> s != null && !s.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (preferredAliases.isEmpty()) {
+            return safeTools.toArray(new ToolCallback[0]);
+        }
+
+        Set<String> preferredToolNames = new LinkedHashSet<>();
+        for (String alias : preferredAliases) {
+            String normalized = alias.trim();
+            preferredToolNames.add(normalized);
+            preferredToolNames.addAll(TOOL_ALIAS_NAME_MAP.getOrDefault(normalized, Set.of()));
+        }
+
+        List<ToolCallback> preferredTools = new ArrayList<>();
+        for (ToolCallback tool : safeTools) {
+            String toolName = safeToolName(tool);
+            if (preferredToolNames.contains(toolName)) {
+                preferredTools.add(tool);
+            }
+        }
+
+        if (!preferredTools.isEmpty()) {
+            return preferredTools.toArray(new ToolCallback[0]);
+        }
+        return safeTools.toArray(new ToolCallback[0]);
+    }
+
+    private static String safeToolName(ToolCallback tool) {
+        if (tool == null || tool.getToolDefinition() == null || tool.getToolDefinition().name() == null) {
+            return "";
+        }
+        return tool.getToolDefinition().name();
+    }
+
+    private static List<String> extractToolNames(ToolCallback[] tools) {
+        List<String> names = new ArrayList<>();
+        if (tools == null) {
+            return names;
+        }
+        for (ToolCallback tool : tools) {
+            String name = safeToolName(tool);
+            if (!name.isEmpty()) {
+                names.add(name);
+            }
+        }
+        return names;
     }
 
     // AI 调用 MCP 服务
@@ -406,6 +597,11 @@ public class LoveApp {
      * @return
      */
     public String doChatWithMcp(String message, String chatId) {
+        log.info("[LoveApp-doChatWithMcp] {}",
+                kv("chatId", chatId,
+                        "messageLength", message == null ? 0 : message.length(),
+                        "message", message));
+        long start = System.currentTimeMillis();
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(message)
@@ -416,7 +612,12 @@ public class LoveApp {
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        long cost = System.currentTimeMillis() - start;
+        log.info("[LoveApp-doChatWithMcp] {}",
+                kv("chatId", chatId,
+                        "durationMs", cost,
+                        "responseLength", content == null ? 0 : content.length(),
+                        "response", content));
         return content;
     }
 }

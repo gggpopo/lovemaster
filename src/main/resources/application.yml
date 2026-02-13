@@ -53,8 +53,34 @@ app:
     provider: volcengine
   rag:
     vectorstore:
+      store: simple
       preload-documents: false
+      pgvector:
+        initialize-schema: false
+        schema-name: public
+        table-name: love_app_vector_store
+        dimensions: 1536
+        max-document-batch-size: 10000
+    retriever:
+      top-k: 5
+      max-top-k: 20
+      similarity-threshold: 0.55
+      status-filter:
+    chunk:
+      enabled: true
+      max-tokens: 300
+      min-chars: 80
+      min-words: 20
+      max-chunks: 2000
+      keep-separator: true
     keyword-enrich:
+      enabled: false
+    eval:
+      default-top-k: 5
+      max-top-k: 20
+      default-similarity-threshold: 0.55
+  debug:
+    rag-eval:
       enabled: false
   # Redis 记忆层配置
   memory:
@@ -81,6 +107,8 @@ app:
       enabled: true  # 开关控制，设为 true 启用 Redis 记忆
       ttl-minutes: 60  # 对话记忆过期时间（分钟）
       profile-ttl-days: 30  # 用户画像过期时间（天）
+    vector:
+      enabled: false  # 临时关闭向量长期记忆（检索 + 写入）
   # 工具开关配置
   tools:
     sticker:

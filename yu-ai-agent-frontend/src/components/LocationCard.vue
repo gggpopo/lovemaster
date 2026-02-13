@@ -1,27 +1,25 @@
 <template>
   <div class="location-card">
-    <div class="card-images" v-if="photos && photos.length > 0">
+    <div class="card-images" v-if="visiblePhotos.length > 0">
       <div class="image-carousel">
         <img
-          v-if="!imageBroken"
-          :src="photos[currentImageIndex]"
+          :src="visiblePhotos[currentImageIndex]"
           :alt="name"
           class="carousel-image"
           @error="handleImageError"
         />
-        <div v-else class="no-image">📷 图片加载失败</div>
 
-        <div class="image-indicators" v-if="photos.length > 1">
+        <div class="image-indicators" v-if="visiblePhotos.length > 1">
           <span
-            v-for="(_, index) in photos"
+            v-for="(_, index) in visiblePhotos"
             :key="index"
             :class="['indicator', { active: index === currentImageIndex }]"
             @click="selectImage(index)"
           />
         </div>
 
-        <button v-if="photos.length > 1" class="nav-btn prev" @click="prevImage">‹</button>
-        <button v-if="photos.length > 1" class="nav-btn next" @click="nextImage">›</button>
+        <button v-if="visiblePhotos.length > 1" class="nav-btn prev" @click="prevImage">‹</button>
+        <button v-if="visiblePhotos.length > 1" class="nav-btn next" @click="nextImage">›</button>
       </div>
     </div>
     <div class="card-images placeholder" v-else>
@@ -47,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface LocationCardProps {
   name: string
@@ -64,47 +62,65 @@ interface LocationCardProps {
 const props = defineProps<LocationCardProps>()
 
 const currentImageIndex = ref(0)
-const imageBroken = ref(false)
+const hiddenPhotoUrls = ref(new Set<string>())
 
-const photos = props.photos || []
-const name = props.name
-const address = props.address || ''
-const rating = props.rating || ''
-const cost = props.cost || ''
-const tel = props.tel || ''
-const mapUrl = props.mapUrl || ''
+const visiblePhotos = computed(() => {
+  const source = Array.isArray(props.photos) ? props.photos : []
+  return source.filter((url) => {
+    return typeof url === 'string' && url && !hiddenPhotoUrls.value.has(url)
+  })
+})
+
+const name = computed(() => props.name || '')
+const address = computed(() => props.address || '')
+const rating = computed(() => props.rating || '')
+const cost = computed(() => props.cost || '')
+const tel = computed(() => props.tel || '')
+const mapUrl = computed(() => props.mapUrl || '')
 
 watch(
   () => props.photos,
   () => {
     currentImageIndex.value = 0
-    imageBroken.value = false
+    hiddenPhotoUrls.value = new Set()
   }
 )
 
+watch(visiblePhotos, (nextPhotos) => {
+  if (!nextPhotos.length) {
+    currentImageIndex.value = 0
+    return
+  }
+  if (currentImageIndex.value >= nextPhotos.length) {
+    currentImageIndex.value = 0
+  }
+})
+
 const prevImage = () => {
-  if (!props.photos || props.photos.length === 0) return
-  imageBroken.value = false
+  if (visiblePhotos.value.length === 0) return
   currentImageIndex.value = currentImageIndex.value > 0
     ? currentImageIndex.value - 1
-    : props.photos.length - 1
+    : visiblePhotos.value.length - 1
 }
 
 const nextImage = () => {
-  if (!props.photos || props.photos.length === 0) return
-  imageBroken.value = false
-  currentImageIndex.value = currentImageIndex.value < props.photos.length - 1
+  if (visiblePhotos.value.length === 0) return
+  currentImageIndex.value = currentImageIndex.value < visiblePhotos.value.length - 1
     ? currentImageIndex.value + 1
     : 0
 }
 
 const selectImage = (index: number) => {
-  imageBroken.value = false
   currentImageIndex.value = index
 }
 
 const handleImageError = () => {
-  imageBroken.value = true
+  const failedUrl = visiblePhotos.value[currentImageIndex.value]
+  if (!failedUrl) return
+
+  const nextHiddenUrls = new Set(hiddenPhotoUrls.value)
+  nextHiddenUrls.add(failedUrl)
+  hiddenPhotoUrls.value = nextHiddenUrls
 }
 </script>
 

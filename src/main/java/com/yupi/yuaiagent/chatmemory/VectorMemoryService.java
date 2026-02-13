@@ -26,10 +26,16 @@ public class VectorMemoryService {
     @Resource(name = "conversationMemoryVectorStore")
     private VectorStore vectorStore;
 
+    @Value("${app.memory.vector.enabled:true}")
+    private boolean vectorMemoryEnabled;
+
     @Value("${app.memory.vector.similarity-threshold:0.65}")
     private double similarityThreshold;
 
     public void saveMessages(String conversationId, List<Message> messages) {
+        if (!vectorMemoryEnabled) {
+            return;
+        }
         if (!StringUtils.hasText(conversationId) || messages == null || messages.isEmpty()) {
             return;
         }
@@ -70,6 +76,9 @@ public class VectorMemoryService {
      * 检索与 query 语义相似的历史记忆，返回拼接后的文本。
      */
     public String retrieveRelevantMemories(String conversationId, String query, int topK) {
+        if (!vectorMemoryEnabled) {
+            return "";
+        }
         if (!StringUtils.hasText(conversationId) || !StringUtils.hasText(query) || topK <= 0) {
             return "";
         }

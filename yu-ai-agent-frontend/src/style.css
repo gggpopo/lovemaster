@@ -1,35 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+
 :root {
-  /* 视觉系统（docs/前端优化技术.md） */
-  --bg: #fdfbf7;
-  --surface: #f5efe6;
-  --surface-2: rgba(255, 255, 255, 0.72);
-  --border: rgba(0, 0, 0, 0.08);
-  --text: #3d3d3d;
-  --muted: rgba(0, 0, 0, 0.55);
-  --muted-2: rgba(0, 0, 0, 0.68);
-  --primary: #d99e82;
-  --primary-strong: #c98566;
-  --accent-purple: #8e4a7d;
-  --accent-pink: #eac9c1;
-  --accent-blue: #a2bbdc;
-  --focus: rgba(217, 158, 130, 0.35);
+  /* Foundation colors */
+  --color-bg: #fdfbf7;
+  --color-surface: #f5efe6;
+  --color-surface-2: rgba(255, 255, 255, 0.82);
+  --color-border: rgba(61, 61, 61, 0.14);
+  --color-border-strong: rgba(61, 61, 61, 0.24);
+  --color-text: #3d3d3d;
+  --color-text-muted: rgba(61, 61, 61, 0.66);
+  --color-text-soft: rgba(61, 61, 61, 0.52);
 
-  --radius-1: 12px;
-  --radius-2: 16px;
-  --shadow-1: 0 10px 30px rgba(0, 0, 0, 0.05);
-  --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.08);
+  /* Accent palette */
+  --color-primary: #d99e82;
+  --color-primary-strong: #c78667;
+  --color-plum: #8e4a7d;
+  --color-blush: #eac9c1;
+  --color-mist-blue: #a2bbdc;
+  --color-success: #6c9c7f;
+  --color-warning: #d29d4e;
+  --color-danger: #cb6f6f;
 
-  /* 8pt 栅格 */
+  /* 8pt spacing system */
   --space-1: 8px;
   --space-2: 16px;
   --space-3: 24px;
   --space-4: 32px;
+  --space-5: 40px;
+  --space-6: 48px;
+  --space-7: 56px;
+  --space-8: 64px;
 
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  --radius-1: 12px;
+  --radius-2: 16px;
+  --radius-3: 20px;
+
+  --shadow-sm: 0 6px 20px rgba(61, 61, 61, 0.08);
+  --shadow-md: 0 14px 36px rgba(61, 61, 61, 0.12);
+  --shadow-lg: 0 24px 56px rgba(61, 61, 61, 0.16);
+
+  --focus-ring: 0 0 0 3px rgba(217, 158, 130, 0.36);
+
+  --font-display: 'Cormorant Garamond', 'STSong', serif;
+  --font-body: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  /* Backward-compatible aliases for existing components */
+  --bg: var(--color-bg);
+  --surface: var(--color-surface);
+  --surface-2: var(--color-surface-2);
+  --border: var(--color-border);
+  --text: var(--color-text);
+  --muted: var(--color-text-muted);
+  --muted-2: var(--color-text-soft);
+  --primary: var(--color-primary);
+  --primary-strong: var(--color-primary-strong);
+  --focus: rgba(217, 158, 130, 0.35);
+
+  color-scheme: light;
+  font-family: var(--font-body);
+  line-height: 1.55;
   font-weight: 400;
-  color: var(--text);
-  background-color: var(--bg);
+  color: var(--color-text);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -41,33 +72,48 @@
 }
 
 html,
-body {
-  margin: 0;
+body,
+#app {
   width: 100%;
   height: 100%;
-  color: var(--text);
-  background: var(--bg);
+  margin: 0;
+}
+
+body {
+  color: var(--color-text);
+  background:
+    radial-gradient(1100px 620px at 8% 8%, rgba(217, 158, 130, 0.2), transparent 62%),
+    radial-gradient(1000px 600px at 96% 20%, rgba(162, 187, 220, 0.18), transparent 60%),
+    radial-gradient(900px 560px at 50% 100%, rgba(234, 201, 193, 0.18), transparent 66%),
+    linear-gradient(180deg, #fefcf9 0%, var(--color-bg) 36%, #f8f2e9 100%);
   overflow-x: hidden;
 }
 
-/* 统一滚动条样式（WebKit） */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(45deg, rgba(61, 61, 61, 0.01) 0 1px, transparent 1px 10px),
+    repeating-linear-gradient(-45deg, rgba(61, 61, 61, 0.01) 0 1px, transparent 1px 12px);
+  mix-blend-mode: multiply;
+  z-index: -1;
 }
 
-::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 999px;
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.16);
-  border-radius: 999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.22);
+p {
+  margin: 0;
 }
 
 a {
@@ -76,12 +122,13 @@ a {
 }
 
 a:hover {
-  color: var(--primary-strong);
+  color: var(--color-primary-strong);
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font-family: inherit;
 }
 
@@ -89,17 +136,42 @@ button {
   cursor: pointer;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  * {
-    scroll-behavior: auto !important;
-  }
+:where(button, a, input, textarea, select):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 10px;
 }
 
-/* 可访问性：清晰的键盘焦点 */
-:where(button, a, input, textarea):focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: 10px;
+::selection {
+  background: rgba(217, 158, 130, 0.28);
+  color: var(--color-text);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(61, 61, 61, 0.06);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(61, 61, 61, 0.2);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(61, 61, 61, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @media (max-width: 768px) {
@@ -109,7 +181,7 @@ button {
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 420px) {
   html,
   body {
     font-size: 14px;
