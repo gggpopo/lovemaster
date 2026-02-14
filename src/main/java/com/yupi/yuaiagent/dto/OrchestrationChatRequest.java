@@ -29,4 +29,9 @@ public class OrchestrationChatRequest {
      * 强制执行模式（可选）：chat/tool/agent/vision
      */
     private String forceMode;
+
+    /**
+     * 场景 ID（可选），如 first_date_planning / cold_war_repair / breakup_recovery
+     */
+    private String sceneId;
 }

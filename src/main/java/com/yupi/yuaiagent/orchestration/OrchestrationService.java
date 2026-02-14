@@ -7,6 +7,10 @@ import com.yupi.yuaiagent.app.LoveApp;
 import com.yupi.yuaiagent.dto.OrchestrationChatRequest;
 import com.yupi.yuaiagent.orchestration.model.ExecutionMode;
 import com.yupi.yuaiagent.orchestration.model.OrchestrationPolicy;
+import com.yupi.yuaiagent.orchestration.scene.SceneContext;
+import com.yupi.yuaiagent.orchestration.scene.ScenePromptService;
+import com.yupi.yuaiagent.orchestration.schema.AssistantResponseSchema;
+import com.yupi.yuaiagent.orchestration.schema.StructuredResponseComposer;
 import com.yupi.yuaiagent.router.IntentRouter;
 import com.yupi.yuaiagent.tenant.RateLimitService;
 import com.yupi.yuaiagent.tenant.TenantContext;
@@ -29,7 +33,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.yupi.yuaiagent.util.LogFieldUtil.kv;
 
@@ -54,6 +57,12 @@ public class OrchestrationService {
 
     @Autowired
     private ObjectProvider<RateLimitService> rateLimitServiceProvider;
+
+    @Resource
+    private StructuredResponseComposer structuredResponseComposer;
+
+    @Resource
+    private ScenePromptService scenePromptService;
 
     @Value("${app.orchestration.sse-timeout-ms:300000}")
     private long sseTimeoutMs;
@@ -91,12 +100,18 @@ public class OrchestrationService {
         String chatId = normalizeChatId(request == null ? null : request.getChatId());
         String message = request == null ? "" : safeTrim(request.getMessage());
         List<String> images = request == null || request.getImages() == null ? List.of() : request.getImages();
+        String requestedSceneId = request == null ? "" : safeTrim(request.getSceneId());
+        SceneContext sceneContext = scenePromptService.resolve(chatId, requestedSceneId, message);
 
         log.info("[OrchestrationService-execute] {}",
                 kv("chatId", chatId,
                         "messageLength", message.length(),
                         "imageCount", images.size(),
                         "forceMode", request == null ? "" : request.getForceMode(),
+                        "requestedSceneId", requestedSceneId,
+                        "sceneId", sceneContext == null ? "" : sceneContext.getSceneId(),
+                        "sceneStage", sceneContext == null ? "" : sceneContext.getSceneStage(),
+                        "sceneTurn", sceneContext == null ? 0 : sceneContext.getTurnCount(),
                         "traceId", traceId));
 
         try {
@@ -111,6 +126,7 @@ public class OrchestrationService {
 
             IntentRouter.RouteResult routeResult = intentRouter.classify(message);
             OrchestrationPolicy policy = resolvePolicy(routeResult, message, images, request == null ? null : request.getForceMode());
+            policy = applyScenePolicy(policy, sceneContext);
             mode = policy.getMode();
 
             log.info("[OrchestrationService-route] {}",
@@ -128,18 +144,22 @@ public class OrchestrationService {
                             "reason", policy.getReason(),
                             "modelProfile", policy.getModelProfile(),
                             "temperature", policy.getTemperature(),
-                            "suggestedTools", policy.getSuggestedTools()));
+                            "suggestedTools", policy.getSuggestedTools(),
+                            "sceneId", sceneContext == null ? "" : sceneContext.getSceneId(),
+                            "sceneStage", sceneContext == null ? "" : sceneContext.getSceneStage(),
+                            "sceneTurn", sceneContext == null ? 0 : sceneContext.getTurnCount()));
 
             sendEvent(emitter, "route", buildRoutePayload(routeResult), traceId);
             sendEvent(emitter, "policy", buildPolicyPayload(policy), traceId);
+            sendEvent(emitter, "scene", buildScenePayload(sceneContext), traceId);
 
             switch (policy.getMode()) {
-                case BLOCK -> executeBlock(emitter, chatId, traceId, start);
-                case VISION -> executeVision(emitter, chatId, message, images, traceId, start, policy);
-                case TOOL -> executeTool(emitter, chatId, message, traceId, start, policy);
-                case AGENT -> executeAgent(emitter, chatId, message, traceId, start, policy);
-                case CHAT -> executeChat(emitter, chatId, message, traceId, start, policy);
-                default -> executeChat(emitter, chatId, message, traceId, start, policy);
+                case BLOCK -> executeBlock(emitter, chatId, traceId, start, routeResult);
+                case VISION -> executeVision(emitter, chatId, message, images, traceId, start, policy, routeResult, sceneContext);
+                case TOOL -> executeTool(emitter, chatId, message, traceId, start, policy, routeResult, sceneContext);
+                case AGENT -> executeAgent(emitter, chatId, message, traceId, start, policy, routeResult, sceneContext);
+                case CHAT -> executeChat(emitter, chatId, message, traceId, start, policy, routeResult, sceneContext);
+                default -> executeChat(emitter, chatId, message, traceId, start, policy, routeResult, sceneContext);
             }
         } catch (Exception e) {
             log.error("[OrchestrationService-execute] {}",
@@ -158,11 +178,17 @@ public class OrchestrationService {
     private void executeBlock(SseEmitter emitter,
                               String chatId,
                               String traceId,
-                              long start) throws IOException {
-        sendEvent(emitter, "chunk", payload(
-                "chatId", chatId,
-                "content", "我不能协助处理可能有伤害或违法风险的请求。你可以换一种安全、合法的方式描述需求，我会继续帮助你。"
-        ), traceId);
+                              long start,
+                              IntentRouter.RouteResult routeResult) throws IOException {
+        sendStructuredResponse(
+                emitter,
+                chatId,
+                traceId,
+                routeResult,
+                ExecutionMode.BLOCK,
+                "我不能协助处理可能有伤害或违法风险的请求。你可以换一种安全、合法的方式描述需求，我会继续帮助你。",
+                true
+        );
         sendDone(emitter, traceId, start, chatId, ExecutionMode.BLOCK, false);
     }
 
@@ -171,10 +197,22 @@ public class OrchestrationService {
                              String message,
                              String traceId,
                              long start,
-                             OrchestrationPolicy policy) {
-        String orchestratedMessage = buildOrchestratedPrompt(message, policy);
-        Flux<String> flux = loveApp.doChatByStream(orchestratedMessage, chatId);
-        streamFlux(emitter, flux, chatId, traceId, start, ExecutionMode.CHAT);
+                             OrchestrationPolicy policy,
+                             IntentRouter.RouteResult routeResult,
+                             SceneContext sceneContext) throws IOException {
+        String userPrompt = buildUserPrompt(message);
+        String dynamicSystemPrompt = buildDynamicSystemPrompt(policy, sceneContext);
+        log.info("[OrchestrationService-prompt] {}",
+                kv("chatId", chatId,
+                        "traceId", traceId,
+                        "mode", ExecutionMode.CHAT,
+                        "sceneId", sceneContext == null ? "" : sceneContext.getSceneId(),
+                        "sceneStage", sceneContext == null ? "" : sceneContext.getSceneStage(),
+                        "systemPromptLength", dynamicSystemPrompt.length(),
+                        "userPromptLength", userPrompt.length()));
+        String result = collectFluxResult(loveApp.doChatByStream(userPrompt, chatId, dynamicSystemPrompt));
+        sendStructuredResponse(emitter, chatId, traceId, routeResult, ExecutionMode.CHAT, result, false);
+        sendDone(emitter, traceId, start, chatId, ExecutionMode.CHAT, false);
     }
 
     private void executeVision(SseEmitter emitter,
@@ -183,10 +221,23 @@ public class OrchestrationService {
                                List<String> images,
                                String traceId,
                                long start,
-                               OrchestrationPolicy policy) {
-        String orchestratedMessage = buildOrchestratedPrompt(message, policy);
-        Flux<String> flux = loveApp.doChatWithVision(orchestratedMessage, chatId, images);
-        streamFlux(emitter, flux, chatId, traceId, start, ExecutionMode.VISION);
+                               OrchestrationPolicy policy,
+                               IntentRouter.RouteResult routeResult,
+                               SceneContext sceneContext) throws IOException {
+        String userPrompt = buildUserPrompt(message);
+        String dynamicSystemPrompt = buildDynamicSystemPrompt(policy, sceneContext);
+        log.info("[OrchestrationService-prompt] {}",
+                kv("chatId", chatId,
+                        "traceId", traceId,
+                        "mode", ExecutionMode.VISION,
+                        "sceneId", sceneContext == null ? "" : sceneContext.getSceneId(),
+                        "sceneStage", sceneContext == null ? "" : sceneContext.getSceneStage(),
+                        "systemPromptLength", dynamicSystemPrompt.length(),
+                        "userPromptLength", userPrompt.length(),
+                        "imageCount", images == null ? 0 : images.size()));
+        String result = collectFluxResult(loveApp.doChatWithVision(userPrompt, chatId, images, dynamicSystemPrompt));
+        sendStructuredResponse(emitter, chatId, traceId, routeResult, ExecutionMode.VISION, result, false);
+        sendDone(emitter, traceId, start, chatId, ExecutionMode.VISION, false);
     }
 
     private void executeTool(SseEmitter emitter,
@@ -194,22 +245,31 @@ public class OrchestrationService {
                              String message,
                              String traceId,
                              long start,
-                             OrchestrationPolicy policy) throws IOException {
+                             OrchestrationPolicy policy,
+                             IntentRouter.RouteResult routeResult,
+                             SceneContext sceneContext) throws IOException {
+        Set<String> suggestedTools = policy == null ? Set.of() : scenePromptService.mergeSuggestedTools(policy.getSuggestedTools(), sceneContext);
         StringBuilder toolGuide = new StringBuilder("\n请优先使用最合适的工具，并在结尾给出可执行建议。");
-        if (policy != null
-                && policy.getSuggestedTools() != null
-                && policy.getSuggestedTools().contains("dateLocation")) {
+        if (suggestedTools.contains("dateLocation")) {
             toolGuide.append("\n当用户咨询餐厅、店铺、景点、咖啡馆等地点推荐时，必须调用 dateLocation 工具返回地点卡片。")
                     .append("\n优先返回带图片的地点信息；如果图片无效，不要输出失效图片链接。")
                     .append("\n不要在正文输出 [实景图](url) 这类原始链接，优先让地点卡片承载图片。");
         }
 
-        String orchestratedMessage = buildOrchestratedPrompt(message, policy) + toolGuide;
+        String userPrompt = buildUserPrompt(message) + toolGuide;
+        String dynamicSystemPrompt = buildDynamicSystemPrompt(policy, sceneContext);
+        log.info("[OrchestrationService-prompt] {}",
+                kv("chatId", chatId,
+                        "traceId", traceId,
+                        "mode", ExecutionMode.TOOL,
+                        "sceneId", sceneContext == null ? "" : sceneContext.getSceneId(),
+                        "sceneStage", sceneContext == null ? "" : sceneContext.getSceneStage(),
+                        "systemPromptLength", dynamicSystemPrompt.length(),
+                        "userPromptLength", userPrompt.length(),
+                        "suggestedTools", suggestedTools));
 
-        String result = loveApp.doChatWithTools(orchestratedMessage, chatId,
-                policy == null ? Set.of() : policy.getSuggestedTools());
-        sendEvent(emitter, "chunk",
-                payload("chatId", chatId, "content", StrUtil.nullToDefault(result, ""), "mode", ExecutionMode.TOOL.name()), traceId);
+        String result = loveApp.doChatWithTools(userPrompt, chatId, suggestedTools, dynamicSystemPrompt);
+        sendStructuredResponse(emitter, chatId, traceId, routeResult, ExecutionMode.TOOL, result, false);
         sendDone(emitter, traceId, start, chatId, ExecutionMode.TOOL, false);
     }
 
@@ -218,60 +278,66 @@ public class OrchestrationService {
                               String message,
                               String traceId,
                               long start,
-                              OrchestrationPolicy policy) throws IOException {
-        String orchestratedMessage = buildOrchestratedPrompt(message, policy)
+                              OrchestrationPolicy policy,
+                              IntentRouter.RouteResult routeResult,
+                              SceneContext sceneContext) throws IOException {
+        String dynamicSystemPrompt = buildDynamicSystemPrompt(policy, sceneContext);
+        String orchestratedMessage = "【系统指令】\n"
+                + dynamicSystemPrompt
+                + "\n【用户输入】\n"
+                + buildUserPrompt(message)
                 + "\n请在可行时拆解步骤，并说明每一步的产出。";
+        log.info("[OrchestrationService-prompt] {}",
+                kv("chatId", chatId,
+                        "traceId", traceId,
+                        "mode", ExecutionMode.AGENT,
+                        "sceneId", sceneContext == null ? "" : sceneContext.getSceneId(),
+                        "sceneStage", sceneContext == null ? "" : sceneContext.getSceneStage(),
+                        "promptLength", orchestratedMessage.length()));
 
         YuManus yuManus = new YuManus(allTools, chatModel);
         String result = yuManus.run(orchestratedMessage);
 
-        String[] lines = result.split("\\n");
-        int step = 1;
-        for (String line : lines) {
-            if (StrUtil.isBlank(line)) {
-                continue;
-            }
-            sendEvent(emitter, "agent_step", payload("chatId", chatId, "step", step++, "content", line), traceId);
-        }
-
+        sendStructuredResponse(emitter, chatId, traceId, routeResult, ExecutionMode.AGENT, result, false);
         sendDone(emitter, traceId, start, chatId, ExecutionMode.AGENT, false);
     }
 
-    private void streamFlux(SseEmitter emitter,
-                            Flux<String> flux,
-                            String chatId,
-                            String traceId,
-                            long start,
-                            ExecutionMode mode) {
-        AtomicBoolean finished = new AtomicBoolean(false);
+    private String collectFluxResult(Flux<String> flux) {
+        if (flux == null) {
+            return "";
+        }
+        List<String> chunks = flux
+                .filter(chunk -> chunk != null && !"[DONE]".equals(chunk))
+                .collectList()
+                .block();
+        if (chunks == null || chunks.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String chunk : chunks) {
+            sb.append(chunk);
+        }
+        return sb.toString();
+    }
 
-        flux.subscribe(chunk -> {
-                    if ("[DONE]".equals(chunk)) {
-                        if (finished.compareAndSet(false, true)) {
-                            sendDone(emitter, traceId, start, chatId, mode, false);
-                        }
-                        return;
-                    }
-                    sendEvent(emitter, "chunk",
-                            payload("chatId", chatId, "content", StrUtil.nullToDefault(chunk, ""), "mode", mode.name()), traceId);
-                },
-                error -> {
-                    log.error("[OrchestrationService-stream] {}",
-                            kv("chatId", chatId, "traceId", traceId, "mode", mode, "status", "error"), error);
-                    try {
-                        sendEvent(emitter, "error",
-                                payload("code", "STREAM_ERROR", "message", StrUtil.blankToDefault(error.getMessage(), "stream error")), traceId);
-                    } catch (Exception ignore) {
-                        // ignore
-                    } finally {
-                        emitter.complete();
-                    }
-                },
-                () -> {
-                    if (finished.compareAndSet(false, true)) {
-                        sendDone(emitter, traceId, start, chatId, mode, false);
-                    }
-                });
+    private void sendStructuredResponse(SseEmitter emitter,
+                                        String chatId,
+                                        String traceId,
+                                        IntentRouter.RouteResult routeResult,
+                                        ExecutionMode mode,
+                                        String text,
+                                        boolean blocked) throws IOException {
+        String intent = routeResult == null ? "UNKNOWN" : routeResult.getIntentType().name();
+        double confidence = routeResult == null ? 0.0 : routeResult.getConfidence();
+        AssistantResponseSchema response = structuredResponseComposer.compose(
+                chatId,
+                intent,
+                mode.name(),
+                StrUtil.nullToDefault(text, ""),
+                confidence,
+                blocked
+        );
+        sendEvent(emitter, "structured_response", payload("chatId", chatId, "response", response), traceId);
     }
 
     private OrchestrationPolicy resolvePolicy(IntentRouter.RouteResult routeResult,
@@ -326,6 +392,24 @@ public class OrchestrationService {
                 .build();
     }
 
+    private OrchestrationPolicy applyScenePolicy(OrchestrationPolicy policy, SceneContext sceneContext) {
+        if (policy == null) {
+            return null;
+        }
+        Set<String> mergedTools = scenePromptService.mergeSuggestedTools(policy.getSuggestedTools(), sceneContext);
+        String reason = StrUtil.blankToDefault(policy.getReason(), "default");
+        if (sceneContext != null) {
+            reason = reason + "+scene(" + sceneContext.getSceneId() + ":" + sceneContext.getSceneStage() + ")";
+        }
+        return OrchestrationPolicy.builder()
+                .mode(policy.getMode())
+                .reason(reason)
+                .modelProfile(policy.getModelProfile())
+                .temperature(policy.getTemperature())
+                .suggestedTools(mergedTools)
+                .build();
+    }
+
     private boolean isComplexTask(String message) {
         if (StrUtil.isBlank(message)) {
             return false;
@@ -342,10 +426,15 @@ public class OrchestrationService {
                 || text.contains("拆解");
     }
 
-    private String buildOrchestratedPrompt(String message, OrchestrationPolicy policy) {
-        String prompt = StrUtil.blankToDefault(message, "请基于当前上下文继续分析");
+    private String buildUserPrompt(String message) {
+        return StrUtil.blankToDefault(message, "请基于当前上下文继续分析");
+    }
+
+    private String buildDynamicSystemPrompt(OrchestrationPolicy policy, SceneContext sceneContext) {
+        String scenePrompt = scenePromptService.buildScenePrompt(sceneContext);
+        String baseRolePrompt = "你是深耕恋爱心理领域的专家，回答需要温柔、尊重、可执行，并保持边界感。";
         if (policy == null) {
-            return prompt;
+            return StrUtil.isBlank(scenePrompt) ? baseRolePrompt : baseRolePrompt + "\n" + scenePrompt;
         }
         String profile = StrUtil.blankToDefault(policy.getModelProfile(), "standard");
         String toneGuide = switch (profile) {
@@ -353,7 +442,10 @@ public class OrchestrationService {
             case "fast" -> "请优先给出简洁直接的答案。";
             default -> "请给出结构化、可执行的建议。";
         };
-        return toneGuide + "\n" + prompt;
+        if (StrUtil.isBlank(scenePrompt)) {
+            return baseRolePrompt + "\n" + toneGuide;
+        }
+        return baseRolePrompt + "\n" + toneGuide + "\n" + scenePrompt;
     }
 
     private void checkRateLimit(String key) {
@@ -386,6 +478,22 @@ public class OrchestrationService {
         payload.put("modelProfile", policy.getModelProfile());
         payload.put("temperature", policy.getTemperature());
         payload.put("suggestedTools", policy.getSuggestedTools());
+        return payload;
+    }
+
+    private Map<String, Object> buildScenePayload(SceneContext sceneContext) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (sceneContext == null) {
+            payload.put("sceneId", "");
+            payload.put("sceneName", "");
+            payload.put("sceneStage", "");
+            payload.put("turnCount", 0);
+            return payload;
+        }
+        payload.put("sceneId", sceneContext.getSceneId());
+        payload.put("sceneName", sceneContext.getSceneName());
+        payload.put("sceneStage", sceneContext.getSceneStage() == null ? "" : sceneContext.getSceneStage().name());
+        payload.put("turnCount", sceneContext.getTurnCount());
         return payload;
     }
 

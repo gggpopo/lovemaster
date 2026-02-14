@@ -28,23 +28,28 @@
                 <div class="sk-line w65" />
               </div>
 
-              <template v-for="(seg, segIndex) in getSegments(msg.content)" :key="segIndex">
-                <div v-if="seg.type === 'text'" class="message-text">{{ seg.content }}</div>
-                <div
-                  v-else-if="seg.type === 'image' && shouldRenderAiImage(msg.id, seg.content, segIndex)"
-                  class="message-image-block"
-                >
-                  <a :href="seg.content" target="_blank" rel="noopener noreferrer">
-                    <img
-                      :src="seg.content"
-                      class="ai-message-image"
-                      loading="lazy"
-                      alt="AI 回复图片"
-                      @error="handleAiImageError(msg.id, seg.content, segIndex)"
-                    />
-                  </a>
-                </div>
-                <LocationCard v-else-if="seg.type === 'location_card'" v-bind="parseLocationCard(seg.content)" />
+              <template v-if="msg.structured">
+                <StructuredResponseRenderer :response="msg.structured" />
+              </template>
+              <template v-else>
+                <template v-for="(seg, segIndex) in getSegments(msg.content)" :key="segIndex">
+                  <div v-if="seg.type === 'text'" class="message-text">{{ seg.content }}</div>
+                  <div
+                    v-else-if="seg.type === 'image' && shouldRenderAiImage(msg.id, seg.content, segIndex)"
+                    class="message-image-block"
+                  >
+                    <a :href="seg.content" target="_blank" rel="noopener noreferrer">
+                      <img
+                        :src="seg.content"
+                        class="ai-message-image"
+                        loading="lazy"
+                        alt="AI 回复图片"
+                        @error="handleAiImageError(msg.id, seg.content, segIndex)"
+                      />
+                    </a>
+                  </div>
+                  <LocationCard v-else-if="seg.type === 'location_card'" v-bind="parseLocationCard(seg.content)" />
+                </template>
               </template>
 
               <span
@@ -191,6 +196,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 import LocationCard from './LocationCard.vue'
+import StructuredResponseRenderer from './StructuredResponseRenderer.vue'
 import { parseMessage } from '../utils/messageParser'
 
 const props = defineProps({
@@ -311,6 +317,7 @@ const normalizeDisplayMessage = (raw, index) => {
   const images = Array.isArray(raw.images)
     ? raw.images.filter((item) => typeof item === 'string' && item)
     : []
+  const structured = raw.structured && typeof raw.structured === 'object' ? raw.structured : null
   const rawTime = Number(raw.time ?? raw.timestamp ?? raw.createdAt ?? raw.updatedAt)
   const time = Number.isFinite(rawTime) && rawTime > 0 ? rawTime : Date.now()
 
@@ -319,6 +326,7 @@ const normalizeDisplayMessage = (raw, index) => {
     content,
     isUser: !!isUser,
     images,
+    structured,
     time,
     type: String(raw.type || '')
   }
@@ -332,6 +340,7 @@ const displayMessages = computed(() => {
       if (!item) return false
       if (item.content) return true
       if (item.images && item.images.length > 0) return true
+      if (item.structured && Array.isArray(item.structured.blocks) && item.structured.blocks.length > 0) return true
       // 保留空内容 AI 占位消息（流式响应中会逐步回写）
       return item.isUser === false
     })

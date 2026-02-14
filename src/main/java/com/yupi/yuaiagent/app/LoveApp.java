@@ -268,11 +268,40 @@ public class LoveApp {
      * @return
      */
     public Flux<String> doChatByStream(String message, String chatId) {
+        return doChatByStream(message, chatId, null);
+    }
+
+    /**
+     * AI 基础对话（支持多轮对话记忆，SSE 流式传输，支持动态系统提示词）
+     *
+     * @param message      用户消息
+     * @param chatId       会话 ID
+     * @param systemPrompt 动态系统提示词（可选）
+     * @return SSE 流
+     */
+    public Flux<String> doChatByStream(String message, String chatId, String systemPrompt) {
         log.info("[LoveApp-doChatByStream] {}",
                 kv("chatId", chatId,
                         "messageLength", message == null ? 0 : message.length(),
+                        "customSystemPrompt", hasText(systemPrompt),
+                        "systemPromptLength", systemPrompt == null ? 0 : systemPrompt.length(),
                         "message", message));
         long start = System.currentTimeMillis();
+        if (hasText(systemPrompt)) {
+            return chatClient
+                    .prompt()
+                    .system(systemPrompt)
+                    .user(message)
+                    .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                    .stream()
+                    .content()
+                    // 前端通过 [DONE] 判断流式结束
+                    .concatWithValues("[DONE]")
+                    .doOnComplete(() -> log.info("[LoveApp-doChatByStream] {}",
+                            kv("chatId", chatId, "status", "completed", "durationMs", System.currentTimeMillis() - start)))
+                    .doOnError(e -> log.error("[LoveApp-doChatByStream] {}",
+                            kv("chatId", chatId, "status", "error", "durationMs", System.currentTimeMillis() - start), e));
+        }
         return chatClient
                 .prompt()
                 .user(message)
@@ -296,10 +325,25 @@ public class LoveApp {
      * @return
      */
     public Flux<String> doChatWithVision(String message, String chatId, List<String> images) {
+        return doChatWithVision(message, chatId, images, null);
+    }
+
+    /**
+     * AI 多模态对话（支持图片理解，SSE 流式传输，支持动态系统提示词）
+     *
+     * @param message             用户消息
+     * @param chatId              会话ID
+     * @param images              Base64 编码的图片列表
+     * @param additionalSystemMsg 动态系统提示词（可选）
+     * @return SSE 流
+     */
+    public Flux<String> doChatWithVision(String message, String chatId, List<String> images, String additionalSystemMsg) {
         int imageCount = images == null ? 0 : images.size();
         log.info("[LoveApp-doChatWithVision] {}",
                 kv("chatId", chatId,
                         "messageLength", message == null ? 0 : message.length(),
+                        "customSystemPrompt", hasText(additionalSystemMsg),
+                        "systemPromptLength", additionalSystemMsg == null ? 0 : additionalSystemMsg.length(),
                         "imageCount", imageCount));
         long start = System.currentTimeMillis();
         // 构建多模态内容
@@ -336,10 +380,11 @@ public class LoveApp {
 
         // 添加文本消息
         String userText = (message == null || message.isBlank()) ? "请分析这张图片" : message;
+        String visionSystemPrompt = buildVisionSystemPrompt(additionalSystemMsg);
 
         return chatClient
                 .prompt()
-                .system(VISION_SYSTEM_PROMPT)
+                .system(visionSystemPrompt)
                 .user(userSpec -> {
                     for (Object content : contentList) {
                         if (content instanceof Media) {
@@ -473,7 +518,7 @@ public class LoveApp {
      * @return
      */
     public String doChatWithTools(String message, String chatId) {
-        return doChatWithTools(message, chatId, Set.of());
+        return doChatWithTools(message, chatId, Set.of(), null);
     }
 
     /**
@@ -485,6 +530,19 @@ public class LoveApp {
      * @return 模型回复
      */
     public String doChatWithTools(String message, String chatId, Set<String> suggestedToolAlias) {
+        return doChatWithTools(message, chatId, suggestedToolAlias, null);
+    }
+
+    /**
+     * AI 恋爱报告功能（支持调用工具 + 按编排建议收敛工具范围 + 动态系统提示词）
+     *
+     * @param message            用户消息
+     * @param chatId             会话 ID
+     * @param suggestedToolAlias 编排层建议工具别名（例如 dateLocation / weather）
+     * @param systemPrompt       动态系统提示词（可选）
+     * @return 模型回复
+     */
+    public String doChatWithTools(String message, String chatId, Set<String> suggestedToolAlias, String systemPrompt) {
         ToolCallback[] selectedTools = selectToolsForToolChat(allTools, suggestedToolAlias);
         List<String> selectedToolNames = extractToolNames(selectedTools);
 
@@ -494,18 +552,34 @@ public class LoveApp {
                         "toolCount", allTools == null ? 0 : allTools.length,
                         "selectedToolCount", selectedTools.length,
                         "selectedTools", selectedToolNames,
+                        "customSystemPrompt", hasText(systemPrompt),
+                        "systemPromptLength", systemPrompt == null ? 0 : systemPrompt.length(),
                         "suggestedToolAlias", suggestedToolAlias,
                         "message", message));
         long start = System.currentTimeMillis();
-        ChatResponse chatResponse = chatClient
-                .prompt()
-                .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
-                // 开启日志，便于观察效果
-                .advisors(new MyLoggerAdvisor())
-                .toolCallbacks(selectedTools)
-                .call()
-                .chatResponse();
+        ChatResponse chatResponse;
+        if (hasText(systemPrompt)) {
+            chatResponse = chatClient
+                    .prompt()
+                    .system(systemPrompt)
+                    .user(message)
+                    .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                    // 开启日志，便于观察效果
+                    .advisors(new MyLoggerAdvisor())
+                    .toolCallbacks(selectedTools)
+                    .call()
+                    .chatResponse();
+        } else {
+            chatResponse = chatClient
+                    .prompt()
+                    .user(message)
+                    .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                    // 开启日志，便于观察效果
+                    .advisors(new MyLoggerAdvisor())
+                    .toolCallbacks(selectedTools)
+                    .call()
+                    .chatResponse();
+        }
         String content = chatResponse.getResult().getOutput().getText();
         long cost = System.currentTimeMillis() - start;
         log.info("[LoveApp-doChatWithTools] {}",
@@ -514,6 +588,17 @@ public class LoveApp {
                         "responseLength", content == null ? 0 : content.length(),
                         "response", content));
         return content;
+    }
+
+    private static boolean hasText(String text) {
+        return text != null && !text.isBlank();
+    }
+
+    private static String buildVisionSystemPrompt(String additionalSystemMsg) {
+        if (!hasText(additionalSystemMsg)) {
+            return VISION_SYSTEM_PROMPT;
+        }
+        return VISION_SYSTEM_PROMPT + "\n\n【场景化补充要求】\n" + additionalSystemMsg;
     }
 
     static ToolCallback[] selectToolsForToolChat(ToolCallback[] allTools, Set<String> suggestedToolAlias) {

@@ -161,8 +161,8 @@ export const chatWithLoveAppVision = (message, chatId, images, onMessage, onErro
 }
 
 // 统一编排聊天（支持路由/策略/步骤事件）
-export const chatWithOrchestrated = (message, chatId, images = [], forceMode = '', onMessage, onError) => {
-  return connectSSEByPost('/ai/orchestrated/chat', { message, chatId, images, forceMode }, onMessage, onError)
+export const chatWithOrchestrated = (message, chatId, images = [], forceMode = '', sceneId = '', onMessage, onError) => {
+  return connectSSEByPost('/ai/orchestrated/chat', { message, chatId, images, forceMode, sceneId }, onMessage, onError)
 }
 
 // AI超级智能体聊天

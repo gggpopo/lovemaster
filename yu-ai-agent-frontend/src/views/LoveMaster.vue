@@ -102,6 +102,8 @@
               <span class="status-dot" :class="connectionStatus" aria-hidden="true" />
               <span>{{ statusText }}</span>
               <span class="dot">·</span>
+              <span>场景 {{ currentSceneLabel }}</span>
+              <span class="dot">·</span>
               <span>阶段 {{ relationStage.label }}</span>
               <span class="dot">·</span>
               <span>模式 {{ orchestrationModeLabel }}</span>
@@ -113,6 +115,14 @@
         </div>
 
         <div class="topbar-actions">
+          <label class="scene-select-wrap">
+            <span class="sr-only">对话场景</span>
+            <select class="scene-select" :value="currentSceneId" @change="handleSceneChange">
+              <option v-for="scene in sceneOptions" :key="scene.value" :value="scene.value">
+                {{ scene.label }}
+              </option>
+            </select>
+          </label>
           <button type="button" class="ghost-btn" :class="{ active: debugPanelEnabled }" @click="toggleDebugPanel">
             {{ debugPanelEnabled ? '关闭调试' : '开启调试' }}
           </button>
@@ -349,6 +359,7 @@ import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AppShell from '../components/AppShell.vue'
 import { chatWithOrchestrated } from '../api'
+import { validateAssistantResponse } from '../schema/assistantResponseSchema'
 
 useHead({
   title: 'AI恋爱大师 - 小高AI超级智能体应用平台',
@@ -399,6 +410,13 @@ const quickActions = [
   { label: '润色回复', value: 'rewrite' },
   { label: '推进计划', value: 'plan' },
   { label: '约会卡', value: 'date-card' }
+]
+
+const sceneOptions = [
+  { label: '通用关系咨询', value: 'general_relationship' },
+  { label: '首次约会规划', value: 'first_date_planning' },
+  { label: '冷战修复', value: 'cold_war_repair' },
+  { label: '分手恢复', value: 'breakup_recovery' }
 ]
 
 const assistantPresets = [
@@ -461,7 +479,8 @@ const currentOrchestration = computed(() => {
     mode: 'CHAT',
     durationMs: 0,
     route: null,
-    policy: null
+    policy: null,
+    scene: null
   }
 })
 
@@ -496,6 +515,16 @@ const displaySessionId = computed(() => {
   const id = String(activeSessionId.value || '')
   if (!id) return '--'
   return id.length > 8 ? `…${id.slice(-8)}` : id
+})
+
+const currentSceneId = computed(() => {
+  const raw = String(currentSession.value?.sceneId || '').trim()
+  return raw || 'general_relationship'
+})
+
+const currentSceneLabel = computed(() => {
+  const found = sceneOptions.find((item) => item.value === currentSceneId.value)
+  return found ? found.label : '通用关系咨询'
 })
 
 const userMessageCount = computed(() => {
@@ -643,6 +672,7 @@ const buildDebugSnapshot = () => {
     exportedAt: new Date().toISOString(),
     connectionStatus: connectionStatus.value,
     activeSessionId: activeSessionId.value,
+    sceneId: session?.sceneId || 'general_relationship',
     pendingAiMessageIndex: pendingAiMessageIndex.value,
     summary: debugSummary.value,
     orchestration: currentOrchestration.value,
@@ -702,6 +732,79 @@ const persistFavorites = () => {
   }
 }
 
+const normalizeStructuredResponse = (raw) => {
+  if (!raw || typeof raw !== 'object') return null
+
+  const blocks = Array.isArray(raw.blocks)
+    ? raw.blocks
+        .filter((item) => item && typeof item === 'object')
+        .map((item, index) => ({
+          type: String(item.type || ''),
+          id: String(item.id || `block_${index}_${Date.now()}`),
+          title: String(item.title || ''),
+          data: item.data && typeof item.data === 'object' ? item.data : {}
+        }))
+    : []
+
+  const normalized = {
+    schemaVersion: String(raw.schemaVersion || raw.schema_version || ''),
+    responseId: String(raw.responseId || raw.response_id || ''),
+    chatId: String(raw.chatId || raw.chat_id || ''),
+    intent: String(raw.intent || ''),
+    mode: String(raw.mode || ''),
+    summary: String(raw.summary || ''),
+    safety: raw.safety && typeof raw.safety === 'object' ? raw.safety : { level: 'safe', flags: [] },
+    confidence: raw.confidence && typeof raw.confidence === 'object' ? raw.confidence : { overall: 0 },
+    blocks,
+    followUp: raw.followUp && typeof raw.followUp === 'object'
+      ? raw.followUp
+      : (raw.follow_up && typeof raw.follow_up === 'object' ? raw.follow_up : null),
+    createdAt: Number(raw.createdAt || raw.created_at || Date.now())
+  }
+
+  const validation = validateAssistantResponse(normalized)
+  if (!validation.valid) {
+    return null
+  }
+  return normalized
+}
+
+const extractStructuredText = (structured) => {
+  if (!structured || !Array.isArray(structured.blocks)) return ''
+  const lines = []
+  if (structured.summary) {
+    lines.push(String(structured.summary))
+  }
+  structured.blocks.forEach((block) => {
+    if (!block || typeof block !== 'object' || !block.data) return
+    if (block.type === 'text' && block.data.text) {
+      lines.push(String(block.data.text))
+      return
+    }
+    if (block.type === 'risk_alert' && block.data.message) {
+      lines.push(String(block.data.message))
+      return
+    }
+    if (block.type === 'location_cards' && Array.isArray(block.data.items)) {
+      block.data.items.forEach((item) => {
+        if (item && typeof item === 'object' && item.name) {
+          lines.push(`地点：${String(item.name)}`)
+        }
+      })
+      return
+    }
+    if (block.type === 'message_options' && Array.isArray(block.data.options)) {
+      block.data.options.forEach((option) => {
+        if (option && typeof option === 'object' && option.text) {
+          lines.push(String(option.text))
+        }
+      })
+    }
+  })
+
+  return lines.join('\n').trim()
+}
+
 const normalizeMessage = (raw, index = 0) => {
   if (typeof raw === 'string') {
     return {
@@ -709,6 +812,7 @@ const normalizeMessage = (raw, index = 0) => {
       content: raw,
       isUser: false,
       images: [],
+      structured: null,
       time: Date.now()
     }
   }
@@ -728,12 +832,14 @@ const normalizeMessage = (raw, index = 0) => {
 
   const rawTime = Number(raw.time ?? raw.timestamp ?? raw.createdAt ?? raw.updatedAt)
   const time = Number.isFinite(rawTime) && rawTime > 0 ? rawTime : Date.now()
+  const structured = normalizeStructuredResponse(raw.structured)
 
   return {
     id: raw.id || `legacy_msg_${index}_${time}`,
-    content,
+    content: content || extractStructuredText(structured),
     isUser,
     images: normalizedImages,
+    structured,
     time,
     type: raw.type || ''
   }
@@ -741,6 +847,8 @@ const normalizeMessage = (raw, index = 0) => {
 
 const ensureSessionRuntime = (session) => {
   if (!session) return
+
+  session.sceneId = String(session.sceneId || 'general_relationship')
 
   if (!Array.isArray(session.messages)) {
     session.messages = []
@@ -751,6 +859,7 @@ const ensureSessionRuntime = (session) => {
       if (!item) return false
       if (item.content) return true
       if (item.images && item.images.length > 0) return true
+      if (item.structured && Array.isArray(item.structured.blocks) && item.structured.blocks.length > 0) return true
       // 保留空内容 AI 占位消息，供流式回写
       return item.isUser === false
     })
@@ -776,14 +885,16 @@ const ensureSessionRuntime = (session) => {
       mode: 'CHAT',
       durationMs: 0,
       route: null,
-      policy: null
+      policy: null,
+      scene: null
     }
   } else {
     session.orchestration = {
       mode: String(session.orchestration.mode || 'CHAT').toUpperCase(),
       durationMs: Number(session.orchestration.durationMs || 0),
       route: session.orchestration.route || null,
-      policy: session.orchestration.policy || null
+      policy: session.orchestration.policy || null,
+      scene: session.orchestration.scene || null
     }
   }
 }
@@ -840,13 +951,15 @@ const createNewSession = () => {
     id,
     title: '新对话',
     updatedAt: now,
+    sceneId: 'general_relationship',
     messages: [],
     trace: [],
     orchestration: {
       mode: 'CHAT',
       durationMs: 0,
       route: null,
-      policy: null
+      policy: null,
+      scene: null
     }
   }
 
@@ -963,6 +1076,7 @@ const sendMessage = (messageData) => {
     content: originText || (images.length > 0 ? '请分析这张图片' : ''),
     isUser: true,
     images,
+    structured: null,
     time: Date.now()
   })
 
@@ -974,6 +1088,7 @@ const sendMessage = (messageData) => {
     content: '',
     isUser: false,
     images: [],
+    structured: null,
     time: Date.now()
   })
   pushDebugEvent(
@@ -985,13 +1100,18 @@ const sendMessage = (messageData) => {
   touchSession()
   persistSessions()
 
-  appendTrace(session, '请求发起', `输入 ${originText ? originText.length : 0} 字，图片 ${images.length} 张`)
+  appendTrace(
+    session,
+    '请求发起',
+    `scene=${session.sceneId || 'general_relationship'}，输入 ${originText ? originText.length : 0} 字，图片 ${images.length} 张`
+  )
 
   orchestrationRequest = chatWithOrchestrated(
     requestText,
     activeSessionId.value,
     images,
     forceMode,
+    session.sceneId || 'general_relationship',
     (rawEvent) => {
       if (rawEvent === '[DONE]') {
         pushDebugEvent('流结束标记', `status=${connectionStatus.value}`)
@@ -1043,6 +1163,23 @@ const sendMessage = (messageData) => {
         return
       }
 
+      if (type === 'scene') {
+        session.orchestration.scene = payload || null
+        if (payload?.sceneId) {
+          session.sceneId = String(payload.sceneId)
+        }
+        appendTrace(
+          session,
+          '场景推进',
+          `${payload?.sceneName || payload?.sceneId || '--'} · ${payload?.sceneStage || '--'} · 第${payload?.turnCount || 0}轮`
+        )
+        pushDebugEvent(
+          'scene',
+          `scene=${payload?.sceneId || '--'}, stage=${payload?.sceneStage || '--'}, turn=${payload?.turnCount || 0}`
+        )
+        return
+      }
+
       if (type === 'chunk') {
         if (!session || aiMessageIndex >= session.messages.length) {
           pushDebugEvent('chunk丢失', `aiIndex=${aiMessageIndex}, current=${session?.messages?.length ?? 0}`)
@@ -1053,6 +1190,27 @@ const sendMessage = (messageData) => {
           session.messages[aiMessageIndex].content += content
           pushDebugEvent('chunk', `+${content.length} chars`)
         }
+        return
+      }
+
+      if (type === 'structured_response') {
+        if (!session || aiMessageIndex >= session.messages.length) {
+          pushDebugEvent('structured丢失', `aiIndex=${aiMessageIndex}, current=${session?.messages?.length ?? 0}`)
+          return
+        }
+        const response = normalizeStructuredResponse(payload?.response)
+        if (!response) {
+          const fallbackMessage = '结构化响应解析失败，请稍后重试。'
+          session.messages[aiMessageIndex].structured = null
+          session.messages[aiMessageIndex].content = fallbackMessage
+          pushDebugEvent('structured_invalid', 'schema validation failed')
+          appendTrace(session, '结构化协议异常', fallbackMessage)
+          return
+        }
+        session.messages[aiMessageIndex].structured = response
+        session.messages[aiMessageIndex].content = extractStructuredText(response) || response.summary || ''
+        pushDebugEvent('structured', `blocks=${response.blocks.length}, mode=${response.mode || '--'}`)
+        appendTrace(session, '结构化响应', `schema=${response.schemaVersion}, blocks=${response.blocks.length}`)
         return
       }
 
@@ -1123,13 +1281,16 @@ const sendMessage = (messageData) => {
 }
 
 const collectLatestPhrase = () => {
-  const latestAiMessage = [...currentMessages.value].reverse().find((item) => !item.isUser && item.content)
+  const latestAiMessage = [...currentMessages.value]
+    .reverse()
+    .find((item) => !item.isUser && (item.content || item.structured))
   if (!latestAiMessage) {
     showInlineTip('当前没有可收藏的话术')
     return
   }
 
-  const candidate = latestAiMessage.content
+  const baseText = latestAiMessage.content || extractStructuredText(latestAiMessage.structured)
+  const candidate = baseText
     .split(/\n|。|！|？/)
     .map((item) => item.trim())
     .find((item) => item.length >= 8)
@@ -1165,6 +1326,20 @@ const simulateVoiceRequest = () => {
 
 const handleToneChange = (toneValue) => {
   currentTone.value = toneValue
+}
+
+const handleSceneChange = (event) => {
+  const nextSceneId = String(event?.target?.value || '').trim() || 'general_relationship'
+  const session = currentSession.value
+  if (!session) return
+  ensureSessionRuntime(session)
+  if (session.sceneId === nextSceneId) return
+  session.sceneId = nextSceneId
+  session.updatedAt = Date.now()
+  appendTrace(session, '场景切换', `切换为 ${sceneOptions.find((item) => item.value === nextSceneId)?.label || nextSceneId}`)
+  pushDebugEvent('scene_select', `scene=${nextSceneId}`)
+  persistSessions()
+  showInlineTip(`已切换到${sceneOptions.find((item) => item.value === nextSceneId)?.label || '新场景'}`)
 }
 
 const handleQuickAction = (actionValue) => {
@@ -1644,6 +1819,20 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
+.scene-select-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.scene-select {
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color-text-muted);
+  padding: 8px 30px 8px 12px;
+  font-size: 12px;
+}
+
 .ghost-btn {
   border: 1px solid var(--color-border);
   border-radius: 999px;
@@ -2047,6 +2236,14 @@ onBeforeUnmount(() => {
   .ghost-btn {
     flex: 1;
     text-align: center;
+  }
+
+  .scene-select-wrap {
+    flex: 1;
+  }
+
+  .scene-select {
+    width: 100%;
   }
 
   .session-heading {

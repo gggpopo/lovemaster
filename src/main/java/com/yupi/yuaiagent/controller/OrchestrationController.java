@@ -33,7 +33,8 @@ public class OrchestrationController {
                 kv("chatId", request == null ? "" : request.getChatId(),
                         "messageLength", request == null || request.getMessage() == null ? 0 : request.getMessage().length(),
                         "imageCount", request == null || request.getImages() == null ? 0 : request.getImages().size(),
-                        "forceMode", request == null ? "" : request.getForceMode()));
+                        "forceMode", request == null ? "" : request.getForceMode(),
+                        "sceneId", request == null ? "" : request.getSceneId()));
         return orchestrationService.orchestrate(request);
     }
 }
