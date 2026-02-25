@@ -63,7 +63,8 @@ public class LoveApp {
             "listToneStyles",
             "calculateAnniversary",
             "getUpcomingFestivals",
-            "suggestDateByDate"
+            "suggestDateByDate",
+            "recallUserMemory"
     );
 
     /**
@@ -73,6 +74,7 @@ public class LoveApp {
             "dateLocation", Set.of("searchDateLocations"),
             "weather", Set.of("queryWeather"),
             "emotionDetection", Set.of("detectEmotion"),
+            "memoryRecall", Set.of("recallUserMemory"),
             "webSearch", Set.of("searchWeb"),
             "giftRecommend", Set.of("searchWeb"),
             "imageSearch", Set.of("searchWeb")

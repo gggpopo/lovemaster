@@ -138,7 +138,11 @@ public class DateLocationTool {
                         .append(" | 📍").append(StringUtils.hasText(address) ? address : "暂无")
                         .append(" | 📞").append(StringUtils.hasText(tel) ? tel : "暂无")
                         .append(photos.isEmpty() ? " | 📸暂无实景图" : " | 📸已附实景图")
-                        .append("\n\n");
+                        .append("\n");
+                if (!photos.isEmpty()) {
+                    sb.append("图片：").append(buildPhotoMarkdown(photos)).append("\n");
+                }
+                sb.append("\n");
             }
 
             sb.append("共找到 ").append(limit).append(" 个推荐地点，地点卡片会展示可访问的实景图片。\n");
@@ -223,5 +227,15 @@ public class DateLocationTool {
             return "";
         }
         return v;
+    }
+
+    private String buildPhotoMarkdown(List<String> photos) {
+        if (photos == null || photos.isEmpty()) {
+            return "";
+        }
+        return Stream.iterate(0, i -> i + 1)
+                .limit(photos.size())
+                .map(i -> "![实景图" + (i + 1) + "](" + photos.get(i) + ")")
+                .collect(Collectors.joining(" "));
     }
 }

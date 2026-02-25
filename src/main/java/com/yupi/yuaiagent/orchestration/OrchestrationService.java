@@ -27,6 +27,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -253,7 +254,12 @@ public class OrchestrationService {
         if (suggestedTools.contains("dateLocation")) {
             toolGuide.append("\n当用户咨询餐厅、店铺、景点、咖啡馆等地点推荐时，必须调用 dateLocation 工具返回地点卡片。")
                     .append("\n优先返回带图片的地点信息；如果图片无效，不要输出失效图片链接。")
+                    .append("\n如果工具结果包含 <!--LOCATION_CARD:...--> 标记，必须逐字原样保留输出，禁止改写、删除或转义。")
                     .append("\n不要在正文输出 [实景图](url) 这类原始链接，优先让地点卡片承载图片。");
+        }
+        if (suggestedTools.contains("memoryRecall")) {
+            toolGuide.append("\n当用户询问“你还记得我之前说过什么/我的预算和偏好”等历史信息时，优先调用 memoryRecall 工具。")
+                    .append("\n先基于工具结果确认历史事实，再给建议，避免凭空编造记忆。");
         }
 
         String userPrompt = buildUserPrompt(message) + toolGuide;
@@ -363,6 +369,11 @@ public class OrchestrationService {
             return buildPolicy(ExecutionMode.BLOCK, "unsafe_intent", routeResult);
         }
 
+        if (isMemoryRecallTask(message)) {
+            OrchestrationPolicy recallPolicy = buildPolicy(ExecutionMode.TOOL, "memory_recall_tool", routeResult);
+            return withSuggestedTool(recallPolicy, "memoryRecall");
+        }
+
         switch (routeResult.getIntentType()) {
             case DATE_PLANNING, GIFT_ADVICE, IMAGE_REQUEST -> {
                 return buildPolicy(ExecutionMode.TOOL, "intent_requires_tools", routeResult);
@@ -389,6 +400,24 @@ public class OrchestrationService {
                 .modelProfile(routeResult.getModelProfile())
                 .temperature(routeResult.getTemperature())
                 .suggestedTools(routeResult.getSuggestedTools())
+                .build();
+    }
+
+    private OrchestrationPolicy withSuggestedTool(OrchestrationPolicy policy, String toolAlias) {
+        if (policy == null || StrUtil.isBlank(toolAlias)) {
+            return policy;
+        }
+        Set<String> mergedTools = new LinkedHashSet<>();
+        if (policy.getSuggestedTools() != null) {
+            mergedTools.addAll(policy.getSuggestedTools());
+        }
+        mergedTools.add(toolAlias.trim());
+        return OrchestrationPolicy.builder()
+                .mode(policy.getMode())
+                .reason(policy.getReason())
+                .modelProfile(policy.getModelProfile())
+                .temperature(policy.getTemperature())
+                .suggestedTools(mergedTools)
                 .build();
     }
 
@@ -424,6 +453,20 @@ public class OrchestrationService {
                 || text.contains("清单")
                 || text.contains("方案")
                 || text.contains("拆解");
+    }
+
+    private boolean isMemoryRecallTask(String message) {
+        if (StrUtil.isBlank(message)) {
+            return false;
+        }
+        String text = message.toLowerCase();
+        return text.contains("还记得")
+                || text.contains("记得我")
+                || text.contains("之前说过")
+                || text.contains("上次说")
+                || text.contains("以前聊过")
+                || text.contains("我之前")
+                || text.contains("你记不记得");
     }
 
     private String buildUserPrompt(String message) {

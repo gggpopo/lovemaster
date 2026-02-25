@@ -33,6 +33,9 @@ public class ToolRegistration {
     @Resource
     private EmotionDetectTool emotionDetectTool;
 
+    @Resource
+    private MemoryRecallTool memoryRecallTool;
+
     // 工具开关配置
     @Value("${app.tools.sticker.enabled:true}")
     private boolean stickerEnabled;
@@ -65,7 +68,8 @@ public class ToolRegistration {
                 dateLocationTool,
                 weatherTool,
                 dateCalendarTool,
-                emotionDetectTool
+                emotionDetectTool,
+                memoryRecallTool
         ));
 
         // 可选工具（根据配置开关）

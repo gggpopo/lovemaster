@@ -18,8 +18,22 @@
           />
         </div>
 
-        <button v-if="visiblePhotos.length > 1" class="nav-btn prev" @click="prevImage">‹</button>
-        <button v-if="visiblePhotos.length > 1" class="nav-btn next" @click="nextImage">›</button>
+        <button
+          v-if="visiblePhotos.length > 1"
+          class="nav-btn prev"
+          @click="prevImage"
+          aria-label="上一张图片"
+        >
+          <span class="nav-icon" aria-hidden="true">‹</span>
+        </button>
+        <button
+          v-if="visiblePhotos.length > 1"
+          class="nav-btn next"
+          @click="nextImage"
+          aria-label="下一张图片"
+        >
+          <span class="nav-icon" aria-hidden="true">›</span>
+        </button>
       </div>
     </div>
     <div class="card-images placeholder" v-else>
@@ -193,18 +207,43 @@ const handleImageError = () => {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
-  border: none;
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.78);
   color: var(--primary-strong);
-  font-size: 18px;
-  line-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .nav-btn:hover {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.95);
+  transform: translateY(-50%) scale(1.06);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+}
+
+.nav-btn:active {
+  transform: translateY(-50%) scale(0.98);
+}
+
+.nav-icon {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.nav-btn.prev .nav-icon {
+  transform: translateX(-1px);
+}
+
+.nav-btn.next .nav-icon {
+  transform: translateX(1px);
 }
 
 .nav-btn.prev {

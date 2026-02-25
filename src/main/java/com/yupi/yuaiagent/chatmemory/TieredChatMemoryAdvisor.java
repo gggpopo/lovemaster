@@ -38,12 +38,14 @@ public class TieredChatMemoryAdvisor implements CallAdvisor, StreamAdvisor {
     private final ChatMemory chatMemory;
     private final ConversationSummaryService summaryService;
     private final VectorMemoryService vectorMemoryService;
+    private final StructuredMidMemoryService structuredMidMemoryService;
     private final int vectorTopK;
 
     private TieredChatMemoryAdvisor(Builder builder) {
         this.chatMemory = builder.chatMemory;
         this.summaryService = builder.summaryService;
         this.vectorMemoryService = builder.vectorMemoryService;
+        this.structuredMidMemoryService = builder.structuredMidMemoryService;
         this.vectorTopK = builder.vectorTopK;
     }
 
@@ -55,6 +57,7 @@ public class TieredChatMemoryAdvisor implements CallAdvisor, StreamAdvisor {
         private final ChatMemory chatMemory;
         private ConversationSummaryService summaryService;
         private VectorMemoryService vectorMemoryService;
+        private StructuredMidMemoryService structuredMidMemoryService;
         private int vectorTopK = 5;
 
         public Builder(ChatMemory chatMemory) {
@@ -68,6 +71,11 @@ public class TieredChatMemoryAdvisor implements CallAdvisor, StreamAdvisor {
 
         public Builder vectorMemoryService(VectorMemoryService vectorMemoryService) {
             this.vectorMemoryService = vectorMemoryService;
+            return this;
+        }
+
+        public Builder structuredMidMemoryService(StructuredMidMemoryService structuredMidMemoryService) {
+            this.structuredMidMemoryService = structuredMidMemoryService;
             return this;
         }
 
@@ -200,6 +208,11 @@ public class TieredChatMemoryAdvisor implements CallAdvisor, StreamAdvisor {
 
             // 5) 异步写入向量记忆
             CompletableFuture.runAsync(() -> vectorMemoryService.saveMessages(conversationId, toAdd));
+
+            // 6) 异步写入结构化中期记忆（可选）
+            if (structuredMidMemoryService != null) {
+                CompletableFuture.runAsync(() -> structuredMidMemoryService.saveFromEvictedMessages(conversationId, toAdd));
+            }
         } catch (Exception e) {
             log.debug("[TieredChatMemoryAdvisor] observeAfter failed, conversationId={}", conversationId, e);
         }

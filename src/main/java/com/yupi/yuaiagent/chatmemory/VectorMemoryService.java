@@ -1,5 +1,6 @@
 package com.yupi.yuaiagent.chatmemory;
 
+import com.yupi.yuaiagent.chatmemory.model.MemoryCandidate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -13,6 +14,7 @@ import org.springframework.util.StringUtils;
 
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -76,11 +78,26 @@ public class VectorMemoryService {
      * 检索与 query 语义相似的历史记忆，返回拼接后的文本。
      */
     public String retrieveRelevantMemories(String conversationId, String query, int topK) {
-        if (!vectorMemoryEnabled) {
+        List<MemoryCandidate> candidates = searchCandidates(conversationId, query, topK);
+        if (candidates == null || candidates.isEmpty()) {
             return "";
         }
+        StringBuilder sb = new StringBuilder();
+        for (MemoryCandidate candidate : candidates) {
+            if (candidate == null || !StringUtils.hasText(candidate.getContent())) {
+                continue;
+            }
+            sb.append(candidate.getContent()).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    public List<MemoryCandidate> searchCandidates(String conversationId, String query, int topK) {
+        if (!vectorMemoryEnabled) {
+            return List.of();
+        }
         if (!StringUtils.hasText(conversationId) || !StringUtils.hasText(query) || topK <= 0) {
-            return "";
+            return List.of();
         }
 
         try {
@@ -93,23 +110,90 @@ public class VectorMemoryService {
 
             List<Document> results = vectorStore.similaritySearch(searchRequest);
             if (results == null || results.isEmpty()) {
-                return "";
+                return List.of();
             }
 
-            StringBuilder sb = new StringBuilder();
+            List<MemoryCandidate> candidates = new ArrayList<>();
             for (Document doc : results) {
                 if (doc == null || !StringUtils.hasText(doc.getText())) {
                     continue;
                 }
-                sb.append(doc.getText()).append("\n");
+                Map<String, Object> metadata = doc.getMetadata() == null ? new HashMap<>() : new HashMap<>(doc.getMetadata());
+                long timestampMs = parseLong(metadata.get("timestamp"), System.currentTimeMillis());
+                double similarity = parseSimilarity(metadata);
+                double importance = parseDouble(metadata.get("importance"), 0.5);
+
+                candidates.add(MemoryCandidate.builder()
+                        .source("vector")
+                        .memoryType(String.valueOf(metadata.getOrDefault("memory_type", "conversation")))
+                        .content(doc.getText())
+                        .similarity(similarity)
+                        .importance(importance)
+                        .timestampMs(timestampMs)
+                        .metadata(metadata)
+                        .build());
             }
-            String out = sb.toString().trim();
-            log.debug("检索到 {} 条长期记忆, conversationId={}", results.size(), conversationId);
-            return out;
+            log.debug("检索到 {} 条长期记忆候选, conversationId={}", candidates.size(), conversationId);
+            return candidates;
         } catch (Exception e) {
-            log.debug("检索长期记忆失败 conversationId={}", conversationId, e);
-            return "";
+            log.debug("检索长期记忆候选失败 conversationId={}", conversationId, e);
+            return List.of();
         }
+    }
+
+    private double parseSimilarity(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return 0.5;
+        }
+        // 不同 VectorStore 版本可能使用不同字段，尽量兼容
+        double score = parseDouble(metadata.get("score"), -1);
+        if (score >= 0) {
+            return clamp01(score);
+        }
+        double similarity = parseDouble(metadata.get("similarity"), -1);
+        if (similarity >= 0) {
+            return clamp01(similarity);
+        }
+        double distance = parseDouble(metadata.get("distance"), -1);
+        if (distance >= 0) {
+            return clamp01(1 - distance);
+        }
+        return 0.5;
+    }
+
+    private double parseDouble(Object value, double fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private long parseLong(Object value, long fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private double clamp01(double value) {
+        if (value < 0) {
+            return 0;
+        }
+        return Math.min(1, value);
     }
 
     private String escape(String s) {

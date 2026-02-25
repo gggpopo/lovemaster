@@ -10,11 +10,10 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
-# 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
-#  datasource:
-#    url: xxx
-#    username: root
-#    password: 123456
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/postgres}
+    username: ${SPRING_DATASOURCE_USERNAME:bytedance}
+    password: ${SPRING_DATASOURCE_PASSWORD:123456}
   ai:
     dashscope:
       # 需要替换为你自己的 key
@@ -39,7 +38,7 @@ spring:
         # Spring AI 默认是 /v1/embeddings，会拼成 /api/v3/v1/embeddings 从而 404
         embeddings-path: /embeddings
         options:
-          model: doubao-embedding
+          model: doubao-embedding-text-240715
 
 #    ollama:
 #      base-url: http://localhost:11434
@@ -82,6 +81,8 @@ app:
   debug:
     rag-eval:
       enabled: false
+    memory:
+      enabled: false
   # Redis 记忆层配置
   memory:
     # 用户画像本地落盘（不依赖 Redis）
@@ -108,7 +109,28 @@ app:
       ttl-minutes: 60  # 对话记忆过期时间（分钟）
       profile-ttl-days: 30  # 用户画像过期时间（天）
     vector:
-      enabled: false  # 临时关闭向量长期记忆（检索 + 写入）
+      # 默认临时关闭“对话记忆向量化”；如需开启可设置 APP_MEMORY_VECTOR_ENABLED=true
+      enabled: ${APP_MEMORY_VECTOR_ENABLED:false}
+      store: pgvector
+      topk: 5
+      similarity-threshold: 0.65
+      pgvector:
+        initialize-schema: false
+        schema-name: public
+        table-name: conversation_memory_store
+        dimensions: 2048
+    mid:
+      enabled: true
+      max-records-per-batch: 8
+      search-scan-limit: 60
+      default-importance: 0.70
+    rerank:
+      weight-similarity: 0.45
+      weight-recency: 0.20
+      weight-importance: 0.20
+      weight-keyword: 0.15
+    recall:
+      candidate-limit: 20
   # 工具开关配置
   tools:
     sticker:

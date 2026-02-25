@@ -5,7 +5,15 @@
     <template v-for="(block, blockIndex) in response.blocks" :key="block.id || `${block.type}_${blockIndex}`">
       <section v-if="block.type === 'text'" class="structured-block">
         <h4 v-if="block.title" class="block-title">{{ block.title }}</h4>
-        <p class="block-text">{{ block.data?.text || '' }}</p>
+        <template v-for="(seg, segIndex) in getTextSegments(block.data?.text)" :key="`text_seg_${segIndex}`">
+          <p v-if="seg.type === 'text'" class="block-text">{{ seg.content }}</p>
+          <div v-else-if="seg.type === 'image'" class="block-image">
+            <a :href="seg.content" target="_blank" rel="noopener noreferrer">
+              <img :src="seg.content" alt="地点实景图" class="block-image-img" loading="lazy" />
+            </a>
+          </div>
+          <LocationCard v-else-if="seg.type === 'location_card'" v-bind="safeParseLocationCard(seg.content)" />
+        </template>
       </section>
 
       <section v-else-if="block.type === 'location_cards'" class="structured-block">
@@ -64,6 +72,7 @@
 
 <script setup>
 import LocationCard from './LocationCard.vue'
+import { parseMessage } from '../utils/messageParser'
 
 const props = defineProps({
   response: {
@@ -85,6 +94,26 @@ const normalizeLocationItems = (items) => {
         photos
       }
     })
+}
+
+const getTextSegments = (text) => {
+  return parseMessage(String(text || ''))
+}
+
+const safeParseLocationCard = (jsonText) => {
+  try {
+    return JSON.parse(jsonText)
+  } catch (error) {
+    return {
+      name: '地点信息解析失败',
+      address: '',
+      rating: '',
+      cost: '',
+      tel: '',
+      photos: [],
+      mapUrl: ''
+    }
+  }
 }
 
 const normalizeSteps = (steps) => {
@@ -150,6 +179,19 @@ const copyOption = async (text) => {
   margin: 0;
   white-space: pre-wrap;
   line-height: 1.6;
+}
+
+.block-image {
+  margin-top: 8px;
+}
+
+.block-image-img {
+  width: min(360px, 100%);
+  max-height: 240px;
+  display: block;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  object-fit: cover;
 }
 
 .location-cards {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate AI App Tests"
+  short_description: "Create offline SpringBoot AI app integration tests"
+  default_prompt: "Use $generating-ai-app-integration-tests to generate a scenario-driven LoveApp integration test with structured test-flow logs."

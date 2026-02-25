@@ -1,6 +1,7 @@
 package com.yupi.yuaiagent.config;
 
 import com.yupi.yuaiagent.chatmemory.ConversationSummaryService;
+import com.yupi.yuaiagent.chatmemory.StructuredMidMemoryService;
 import com.yupi.yuaiagent.chatmemory.TieredChatMemoryAdvisor;
 import com.yupi.yuaiagent.chatmemory.VectorMemoryService;
 import lombok.extern.slf4j.Slf4j;
@@ -81,10 +82,12 @@ public class ChatMemoryConfig {
     public TieredChatMemoryAdvisor tieredChatMemoryAdvisor(ChatMemory chatMemory,
                                                            ConversationSummaryService summaryService,
                                                            VectorMemoryService vectorMemoryService,
+                                                           StructuredMidMemoryService structuredMidMemoryService,
                                                            @Value("${app.memory.vector.topk:5}") int vectorTopK) {
         return TieredChatMemoryAdvisor.builder(chatMemory)
                 .summaryService(summaryService)
                 .vectorMemoryService(vectorMemoryService)
+                .structuredMidMemoryService(structuredMidMemoryService)
                 .vectorTopK(vectorTopK)
                 .build();
     }

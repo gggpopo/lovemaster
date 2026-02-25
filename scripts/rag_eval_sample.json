@@ -1,0 +1,35 @@
+{
+  "topK": 5,
+  "similarityThreshold": 0.55,
+  "matchMode": "ANY",
+  "cases": [
+    {
+      "caseId": "case-001",
+      "query": "第一次约会去哪里比较合适",
+      "expectedKeywords": [
+        "约会",
+        "建议"
+      ],
+      "statusFilter": "单身"
+    },
+    {
+      "caseId": "case-002",
+      "query": "怎么缓解恋爱中的沟通冲突",
+      "expectedKeywords": [
+        "沟通",
+        "倾听"
+      ],
+      "statusFilter": "恋爱"
+    },
+    {
+      "caseId": "case-003",
+      "query": "婚后和父母关系如何平衡",
+      "expectedKeywords": [
+        "家庭",
+        "边界"
+      ],
+      "statusFilter": "已婚"
+    }
+  ]
+}
+
