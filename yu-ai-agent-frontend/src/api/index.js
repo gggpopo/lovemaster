@@ -161,7 +161,17 @@ export const chatWithLoveAppVision = (message, chatId, images, onMessage, onErro
 
 // 统一编排聊天（支持路由/策略/步骤事件）
 export const chatWithOrchestrated = (message, chatId, images = [], forceMode = '', sceneId = '', onMessage, onError) => {
-  return connectSSEByPost('/ai/orchestrated/chat', { message, chatId, images, forceMode, sceneId }, onMessage, onError)
+  const conversationId = encodeURIComponent(chatId || '')
+  return connectSSEByPost(`/conversations/${conversationId}/messages`, { message, images, forceMode, sceneId }, onMessage, onError)
+}
+
+// 中断会话中的执行任务
+export const interruptConversation = async (chatId, reason = 'user_interrupt') => {
+  const conversationId = encodeURIComponent(chatId || '')
+  const { data } = await request.post(`/conversations/${conversationId}/interrupt`, null, {
+    params: { reason }
+  })
+  return data
 }
 
 // AI超级智能体聊天
@@ -173,5 +183,6 @@ export default {
   chatWithLoveApp,
   chatWithLoveAppVision,
   chatWithOrchestrated,
-  chatWithManus
+  chatWithManus,
+  interruptConversation
 }

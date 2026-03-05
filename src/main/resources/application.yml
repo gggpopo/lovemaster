@@ -14,10 +14,13 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/postgres}
     username: ${SPRING_DATASOURCE_USERNAME:bytedance}
     password: ${SPRING_DATASOURCE_PASSWORD:123456}
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
   ai:
     dashscope:
       # 需要替换为你自己的 key
-      api-key: sk-d2053bf9bede4d5388c8f1b86bf0b31c
+      api-key: ${DASHSCOPE_API_KEY:your-api-key}
       chat:
         options:
           model: qwen-plus
@@ -25,7 +28,7 @@ spring:
     # 火山引擎 Ark / 豆包：通过 OpenAI 兼容接口接入（需要启用 spring-ai-starter-model-openai 依赖）
     # 注意：加入 OpenAI starter 后，若不配置 api-key，OpenAI 相关自动配置会直接报错导致启动失败。
     openai:
-      api-key: 5d9c396e-e9aa-4c22-82c1-080cfb48ee6d
+      api-key: ${VOLCENGINE_API_KEY:5d9c396e-e9aa-4c22-82c1-080cfb48ee6d}
       base-url: https://ark.cn-beijing.volces.com/api/v3
       chat:
         # 火山引擎 Ark 的 OpenAI-Compatible Chat Completions 路径为 /chat/completions
@@ -50,6 +53,27 @@ spring:
 app:
   llm:
     provider: volcengine
+  orchestration:
+    multi-agent:
+      enabled: true
+    sse:
+      protocol: v2
+    interrupt:
+      enabled: true
+    # V3 动态编排配置
+    v3:
+      enabled: true
+      plan-agent:
+        model: qwen-plus
+        temperature: 0.1
+        max-tokens: 500
+        cache-enabled: false
+        cache-ttl-seconds: 3600
+      token-budget:
+        default: 800
+        chitchat: 200
+        emotion-support: 400
+        date-planning: 600
   rag:
     vectorstore:
       store: simple
@@ -187,10 +211,15 @@ knife4j:
 # searchAPI
 search-api:
   # 需要替换为你自己的 key
-  api-key:
+  api-key: ${SEARCH_API_KEY:}
 # 高德地图 Web Service API
 amap:
-  api-key: 37009ce089714bfc72fe5e7fb315ada3
+  api-key: ${AMAP_API_KEY:37009ce089714bfc72fe5e7fb315ada3}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
   level:

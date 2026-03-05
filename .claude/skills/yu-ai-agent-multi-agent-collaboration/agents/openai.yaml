@@ -1,0 +1,4 @@
+interface:
+  display_name: "Yu Multi-Agent Collab"
+  short_description: "Bounded prompts for backend/frontend/MCP collaboration"
+  default_prompt: "Use $yu-ai-agent-multi-agent-collaboration to plan and execute a cross-module task with Coordinator-Agent, Contract-Agent, implementation agents, and QA-Agent."

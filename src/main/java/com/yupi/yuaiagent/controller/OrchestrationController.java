@@ -17,6 +17,7 @@ import static com.yupi.yuaiagent.util.LogFieldUtil.kv;
  * 统一编排 API
  */
 @Slf4j
+@Deprecated
 @RestController
 @RequestMapping("/ai/orchestrated")
 public class OrchestrationController {
@@ -29,6 +30,8 @@ public class OrchestrationController {
      */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter orchestratedChat(@RequestBody OrchestrationChatRequest request) {
+        log.warn("[OrchestrationController-orchestratedChat] {}",
+                kv("status", "deprecated_endpoint", "recommend", "/conversations/{id}/messages"));
         log.info("[OrchestrationController-orchestratedChat] {}",
                 kv("chatId", request == null ? "" : request.getChatId(),
                         "messageLength", request == null || request.getMessage() == null ? 0 : request.getMessage().length(),

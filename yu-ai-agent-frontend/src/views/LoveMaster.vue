@@ -157,29 +157,21 @@
 
     <template #right>
       <section class="insight-panel">
-        <article class="insight-card">
-          <div class="card-head">
-            <h3>关系进度环</h3>
-            <span>{{ relationStage.progress }}%</span>
-          </div>
-          <div class="progress-ring" :style="{ '--ring-progress': `${relationStage.progress}%` }">
-            <div class="ring-inner">
-              <p class="ring-stage">{{ relationStage.label }}</p>
-              <p class="ring-note">{{ relationStage.note }}</p>
-            </div>
-          </div>
-        </article>
+        <EmotionDashboard
+          :emotion-profile="emotionProfile"
+          :emotion-history="emotionHistory"
+        />
 
-        <article class="insight-card">
-          <div class="card-head">
-            <h3>情绪温度条</h3>
-            <span>{{ emotionLabel }}</span>
-          </div>
-          <div class="emotion-track" aria-label="情绪温度">
-            <div class="emotion-fill" :style="{ width: `${emotionPercent}%`, background: emotionGradient }" />
-          </div>
-          <p class="emotion-desc">{{ emotionDescription }}</p>
-        </article>
+        <RelationshipHealth
+          :metrics="relationshipMetrics"
+          :overall-score="relationshipScore"
+          :stage="relationStage.label"
+        />
+
+        <AgentCollaboration
+          :steps="agentSteps"
+          :is-running="agentPipelineRunning"
+        />
 
         <article class="insight-card">
           <div class="card-head">
@@ -235,6 +227,8 @@
           </div>
           <p v-else class="empty-tip">暂无调试事件，发送一次消息后可观察链路细节。</p>
         </article>
+
+        <EmotionDiary :entries="diaryEntries" />
 
         <article class="insight-card">
           <div class="card-head">
@@ -358,8 +352,12 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AppShell from '../components/AppShell.vue'
-import { chatWithOrchestrated } from '../api'
+import { chatWithOrchestrated, interruptConversation } from '../api'
 import { validateAssistantResponse } from '../schema/assistantResponseSchema'
+import EmotionDashboard from '../components/EmotionDashboard.vue'
+import RelationshipHealth from '../components/RelationshipHealth.vue'
+import AgentCollaboration from '../components/AgentCollaboration.vue'
+import EmotionDiary from '../components/EmotionDiary.vue'
 
 useHead({
   title: 'AI恋爱大师 - 小高AI超级智能体应用平台',
@@ -397,6 +395,35 @@ const inlineTip = ref('')
 const debugPanelEnabled = ref(false)
 const debugEvents = ref([])
 const pendingAiMessageIndex = ref(-1)
+
+// 新增：多 Agent 协作状态
+const agentSteps = ref([])
+const agentPipelineRunning = ref(false)
+
+// 新增：增强情绪数据
+const emotionProfile = ref({
+  emotions: [],
+  trend: 'STABLE',
+  overallValence: 0,
+  crisisDetected: false,
+  narrativeSummary: '',
+  maxIntensity: 0
+})
+const emotionHistory = ref([])
+
+// 新增：关系健康度
+const relationshipMetrics = ref({
+  communicationQuality: 50,
+  emotionalStability: 50,
+  interactionFrequency: 30,
+  conflictResolution: 50,
+  intimacy: 30
+})
+const relationshipScore = ref(50)
+
+// 新增：情感日记
+const diaryEntries = ref([])
+
 let tipTimer = null
 
 const toneOptions = [
@@ -636,6 +663,17 @@ const showInlineTip = (text) => {
     inlineTip.value = ''
     tipTimer = null
   }, 3200)
+}
+
+function recalcRelationshipScore() {
+  const m = relationshipMetrics.value
+  relationshipScore.value = Math.round(
+    m.communicationQuality * 0.3 +
+    m.emotionalStability * 0.25 +
+    m.interactionFrequency * 0.2 +
+    m.conflictResolution * 0.15 +
+    m.intimacy * 0.1
+  )
 }
 
 const pushDebugEvent = (type, detail) => {
@@ -913,6 +951,11 @@ const appendTrace = (session, type, detail) => {
 
 const closeConnections = () => {
   if (orchestrationRequest) {
+    if (connectionStatus.value === 'connecting' && activeSessionId.value) {
+      interruptConversation(activeSessionId.value).catch(() => {
+        // ignore
+      })
+    }
     orchestrationRequest.close()
     orchestrationRequest = null
     pushDebugEvent('连接关闭', '手动中止当前 SSE 请求')
@@ -1062,6 +1105,13 @@ const sendMessage = (messageData) => {
 
   ensureSessionRuntime(session)
 
+  // Reset agent pipeline for new message
+  agentSteps.value = [
+    { agent: 'EMOTION_ANALYST', status: 'pending', duration: 0, result: '' },
+    { agent: 'INTENT_ANALYZER', status: 'pending', duration: 0, result: '' }
+  ]
+  agentPipelineRunning.value = true
+
   const originText = typeof messageData === 'string' ? messageData : (messageData?.text || '')
   const images = Array.isArray(messageData?.images) ? messageData.images : []
   const toneValue = typeof messageData === 'object' ? (messageData?.tone || currentTone.value) : currentTone.value
@@ -1147,99 +1197,151 @@ const sendMessage = (messageData) => {
         return
       }
 
-      if (type === 'route') {
-        session.orchestration.route = payload
-        const confidence = Number(payload?.confidence || 0)
-        appendTrace(session, '路由判定', `intent=${payload?.intent || '--'}，置信度=${Number.isFinite(confidence) ? confidence.toFixed(2) : '--'}`)
-        pushDebugEvent('route', `intent=${payload?.intent || '--'}, confidence=${Number.isFinite(confidence) ? confidence.toFixed(2) : '--'}`)
+      if (type === 'orchestration_started') {
+        // Update agent pipeline steps
+        if (agentSteps.value.length >= 2) {
+          agentSteps.value[0].status = 'running'
+          agentSteps.value[1].status = 'running'
+        }
+        appendTrace(session, '编排开始', `protocol=${payload?.protocol || 'v2'}`)
+        pushDebugEvent('orchestration_started', `protocol=${payload?.protocol || 'v2'}`)
         return
       }
 
-      if (type === 'policy') {
+      if (type === 'intent_classified') {
+        session.orchestration.route = payload
+        // Update agent pipeline
+        const intentStep = agentSteps.value.find(s => s.agent === 'INTENT_ANALYZER')
+        if (intentStep) intentStep.status = 'completed'
+        const emotionStep = agentSteps.value.find(s => s.agent === 'EMOTION_ANALYST')
+        if (emotionStep) emotionStep.status = 'completed'
+        // Update interaction frequency
+        relationshipMetrics.value.interactionFrequency = Math.min(100, relationshipMetrics.value.interactionFrequency + 2)
+        recalcRelationshipScore()
+        const confidence = Number(payload?.confidence || 0)
+        appendTrace(session, '路由判定', `intent=${payload?.intent || '--'}，置信度=${Number.isFinite(confidence) ? confidence.toFixed(2) : '--'}`)
+        pushDebugEvent('intent_classified', `intent=${payload?.intent || '--'}, confidence=${Number.isFinite(confidence) ? confidence.toFixed(2) : '--'}`)
+        return
+      }
+
+      if (type === 'policy_selected') {
         session.orchestration.policy = payload
         session.orchestration.mode = payload?.mode || 'CHAT'
         appendTrace(session, '策略决策', `${payload?.mode || 'CHAT'} · ${payload?.reason || 'default'}`)
-        pushDebugEvent('policy', `mode=${payload?.mode || 'CHAT'}, reason=${payload?.reason || 'default'}`)
+        pushDebugEvent('policy_selected', `mode=${payload?.mode || 'CHAT'}, reason=${payload?.reason || 'default'}`)
         return
       }
 
-      if (type === 'scene') {
-        session.orchestration.scene = payload || null
-        if (payload?.sceneId) {
-          session.sceneId = String(payload.sceneId)
-        }
-        appendTrace(
-          session,
-          '场景推进',
-          `${payload?.sceneName || payload?.sceneId || '--'} · ${payload?.sceneStage || '--'} · 第${payload?.turnCount || 0}轮`
-        )
-        pushDebugEvent(
-          'scene',
-          `scene=${payload?.sceneId || '--'}, stage=${payload?.sceneStage || '--'}, turn=${payload?.turnCount || 0}`
-        )
+      if (type === 'agent_started') {
+        appendTrace(session, 'Agent启动', `${payload?.agent || '--'}`)
+        pushDebugEvent('agent_started', `agent=${payload?.agent || '--'}`)
         return
       }
 
-      if (type === 'chunk') {
-        if (!session || aiMessageIndex >= session.messages.length) {
-          pushDebugEvent('chunk丢失', `aiIndex=${aiMessageIndex}, current=${session?.messages?.length ?? 0}`)
-          return
-        }
-        const content = String(payload?.content || '')
-        if (content) {
-          session.messages[aiMessageIndex].content += content
-          pushDebugEvent('chunk', `+${content.length} chars`)
-        }
+      if (type === 'agent_finished') {
+        appendTrace(session, 'Agent完成', `${payload?.agent || '--'} · ${payload?.summary || ''}`)
+        pushDebugEvent('agent_finished', `agent=${payload?.agent || '--'}, blocked=${payload?.blocked ? '1' : '0'}`)
         return
       }
 
-      if (type === 'structured_response') {
-        if (!session || aiMessageIndex >= session.messages.length) {
-          pushDebugEvent('structured丢失', `aiIndex=${aiMessageIndex}, current=${session?.messages?.length ?? 0}`)
-          return
-        }
-        const response = normalizeStructuredResponse(payload?.response)
-        if (!response) {
-          const fallbackMessage = '结构化响应解析失败，请稍后重试。'
-          session.messages[aiMessageIndex].structured = null
-          session.messages[aiMessageIndex].content = fallbackMessage
-          pushDebugEvent('structured_invalid', 'schema validation failed')
-          appendTrace(session, '结构化协议异常', fallbackMessage)
-          return
-        }
-        session.messages[aiMessageIndex].structured = response
-        session.messages[aiMessageIndex].content = extractStructuredText(response) || response.summary || ''
-        pushDebugEvent('structured', `blocks=${response.blocks.length}, mode=${response.mode || '--'}`)
-        appendTrace(session, '结构化响应', `schema=${response.schemaVersion}, blocks=${response.blocks.length}`)
+      if (type === 'agent_selected') {
+        const agent = payload?.agent || '--'
+        agentSteps.value.push({ agent, status: 'running', duration: 0, result: '' })
+        appendTrace(session, 'Agent选择', agent)
+        pushDebugEvent('agent_selected', `agent=${agent}`)
         return
       }
 
-      if (type === 'agent_step') {
-        if (!session || aiMessageIndex >= session.messages.length) {
-          pushDebugEvent('agent_step丢失', `aiIndex=${aiMessageIndex}, current=${session?.messages?.length ?? 0}`)
-          return
-        }
-        const content = String(payload?.content || '')
-        if (content) {
-          if (session.messages[aiMessageIndex].content) {
-            session.messages[aiMessageIndex].content += '\n'
+      if (type === 'emotion_analyzed') {
+        const profile = payload?.emotionProfile || payload
+        if (profile) {
+          emotionProfile.value = {
+            emotions: profile.emotions || [],
+            trend: profile.trend || 'STABLE',
+            overallValence: profile.overallValence || 0,
+            crisisDetected: profile.crisisDetected || false,
+            narrativeSummary: profile.narrativeSummary || '',
+            maxIntensity: profile.maxIntensity || 0
           }
+          emotionHistory.value.push({
+            valence: profile.overallValence || 0,
+            timestamp: Date.now()
+          })
+          // Keep only last 20 history points
+          if (emotionHistory.value.length > 20) {
+            emotionHistory.value = emotionHistory.value.slice(-20)
+          }
+          // Update relationship emotional stability
+          const stability = Math.max(0, Math.min(100, 50 + (profile.overallValence || 0) * 50))
+          relationshipMetrics.value.emotionalStability = Math.round(stability)
+          recalcRelationshipScore()
+        }
+        appendTrace(session, '情绪分析', profile?.narrativeSummary || '--')
+        pushDebugEvent('emotion_analyzed', `valence=${profile?.overallValence || 0}`)
+        return
+      }
+
+      if (type === 'reflection_completed') {
+        const score = payload?.qualityScore || 0
+        const wasRefined = payload?.wasRefined || false
+        // Update the last agent step to show reflection
+        agentSteps.value.push({
+          agent: 'REFLECTION',
+          status: 'completed',
+          duration: 0,
+          result: `质量评分: ${score.toFixed ? score.toFixed(1) : score}/10${wasRefined ? ' (已优化)' : ''}`
+        })
+        appendTrace(session, '质量审查', `score=${score}, refined=${wasRefined}`)
+        pushDebugEvent('reflection_completed', `score=${score}, refined=${wasRefined}`)
+        return
+      }
+
+      if (type === 'crisis_detected') {
+        appendTrace(session, '⚠️ 危机检测', `severity=${payload?.severity || 'MEDIUM'}`)
+        pushDebugEvent('crisis_detected', `severity=${payload?.severity || 'MEDIUM'}`)
+        return
+      }
+
+      if (type === 'memory_consolidated') {
+        agentSteps.value.push({ agent: 'MEMORY_CURATOR', status: 'completed', duration: 0, result: '记忆已整理' })
+        pushDebugEvent('memory_consolidated', 'done')
+        return
+      }
+
+      if (type === 'tool_call_started') {
+        appendTrace(session, '工具调用', `tools=${Array.isArray(payload?.tools) ? payload.tools.join(',') : '--'}`)
+        pushDebugEvent('tool_call_started', `count=${payload?.toolCount || 0}`)
+        return
+      }
+
+      if (type === 'tool_call_finished') {
+        appendTrace(session, '工具完成', `resultLength=${payload?.resultLength || 0}`)
+        pushDebugEvent('tool_call_finished', `resultLength=${payload?.resultLength || 0}`)
+        return
+      }
+
+      if (type === 'response_chunk') {
+        if (!session || aiMessageIndex >= session.messages.length) {
+          pushDebugEvent('response_chunk丢失', `aiIndex=${aiMessageIndex}, current=${session?.messages?.length ?? 0}`)
+          return
+        }
+        const content = String(payload?.content || payload?.text || '')
+        if (content) {
           session.messages[aiMessageIndex].content += content
-          appendTrace(session, `执行步骤 ${payload?.step || ''}`.trim(), content)
-          pushDebugEvent('agent_step', `step=${payload?.step || ''}, len=${content.length}`)
+          pushDebugEvent('response_chunk', `+${content.length} chars`)
         }
         return
       }
 
-      if (type === 'error') {
+      if (type === 'failed') {
         if (!session) return
         connectionStatus.value = 'error'
-        const errorMessage = String(payload?.message || '请求失败，请稍后重试')
+        const errorMessage = String(payload?.message || payload?.code || '请求失败，请稍后重试')
         if (aiMessageIndex < session.messages.length && !session.messages[aiMessageIndex].content) {
           session.messages[aiMessageIndex].content = errorMessage
         }
         appendTrace(session, '执行异常', errorMessage)
-        pushDebugEvent('error', errorMessage)
+        pushDebugEvent('failed', errorMessage)
         touchSession()
         persistSessions()
         orchestrationRequest = null
@@ -1247,8 +1349,24 @@ const sendMessage = (messageData) => {
         return
       }
 
-      if (type === 'done') {
+      if (type === 'interrupted') {
         if (!session) return
+        connectionStatus.value = 'disconnected'
+        if (aiMessageIndex < session.messages.length && !session.messages[aiMessageIndex].content) {
+          session.messages[aiMessageIndex].content = '本次任务已中断。'
+        }
+        appendTrace(session, '任务中断', `${payload?.reason || 'user_interrupt'} · ${payload?.durationMs || 0}ms`)
+        pushDebugEvent('interrupted', `reason=${payload?.reason || 'user_interrupt'}`)
+        touchSession()
+        persistSessions()
+        orchestrationRequest = null
+        pendingAiMessageIndex.value = -1
+        return
+      }
+
+      if (type === 'response_completed') {
+        if (!session) return
+        agentPipelineRunning.value = false
         session.orchestration.mode = payload?.mode || session.orchestration.mode || 'CHAT'
         session.orchestration.durationMs = Number(payload?.durationMs || 0)
         connectionStatus.value = payload?.error ? 'error' : 'disconnected'
@@ -1257,7 +1375,7 @@ const sendMessage = (messageData) => {
           '执行完成',
           `${session.orchestration.mode} · ${session.orchestration.durationMs}ms`
         )
-        pushDebugEvent('done', `mode=${session.orchestration.mode}, duration=${session.orchestration.durationMs}ms`)
+        pushDebugEvent('response_completed', `mode=${session.orchestration.mode}, duration=${session.orchestration.durationMs}ms`)
         touchSession()
         persistSessions()
         orchestrationRequest = null
